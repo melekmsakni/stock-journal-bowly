@@ -233,6 +233,10 @@ export default function StockJournal() {
     setShowVerify(!showVerify);
   }
 
+  function deleteHistoryEntry(dateStr) {
+    setHistoryKeys((prev) => prev.filter((d) => d !== dateStr));
+  }
+
   // Styles
   const colors = {
     bg: "#FAF8F5",
@@ -482,6 +486,15 @@ export default function StockJournal() {
       justifyContent: "space-between",
       alignItems: "center",
     },
+    deleteBtn: {
+      background: "none",
+      border: "none",
+      color: colors.red,
+      fontSize: 18,
+      cursor: "pointer",
+      padding: "4px 8px",
+      lineHeight: 1,
+    },
   };
 
   if (loading) {
@@ -541,7 +554,18 @@ export default function StockJournal() {
                 }}
               >
                 <span style={{ fontWeight: 600 }}>{formatDate(d)}</span>
-                <span style={{ color: colors.accent, fontSize: 13 }}>Voir →</span>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ color: colors.accent, fontSize: 13 }}>Voir →</span>
+                  <button
+                    style={s.deleteBtn}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      deleteHistoryEntry(d);
+                    }}
+                  >
+                    ✕
+                  </button>
+                </div>
               </div>
             ))
           )}
