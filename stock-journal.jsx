@@ -599,7 +599,7 @@ export default function StockJournal() {
           <div style={s.summaryBar}>
             <div style={s.summaryText}>
               <span>{totalItems} articles</span>
-              <span>Stock initial: {totalOpening}</span>
+              <span>Nombre de portions: {totalOpening}</span>
               {phase !== "opening" && <span>Vendu matin: {totalMorningSold}</span>}
               {phase === "closing" && <span>Vendu après-midi: {totalAfternoonSold}</span>}
             </div>
@@ -624,7 +624,7 @@ export default function StockJournal() {
 
                   {/* Opening stock */}
                   <div style={s.row}>
-                    <span style={s.label}>Stock initial</span>
+                    <span style={s.label}>Nombre de portions</span>
                     <input
                       type="number"
                       inputMode="numeric"
