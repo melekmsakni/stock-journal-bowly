@@ -12,6 +12,9 @@ if (!window.storage) {
       const value = localStorage.getItem(key);
       return value === null ? null : { value };
     },
+    async remove(key) {
+      localStorage.removeItem(key);
+    },
     async list(prefix) {
       const keys = [];
       for (let index = 0; index < localStorage.length; index += 1) {

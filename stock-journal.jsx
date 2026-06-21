@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { createClient } from '@supabase/supabase-js';
 import { supabase } from './src/supabaseClient';
 
 const PHASES = ["opening", "midday", "closing"];
@@ -8,27 +9,45 @@ const PHASE_LABELS = {
   closing: "Ventes de l'après-midi",
 };
 
-const DEFAULT_ITEMS = [
-  "Saumon fumé",
-  "Bœuf",
-  "Crevette",
-  "Poulet",
-  "Bœuf fromage",
-  "Haloumi",
-  "Saumon",
-  "Poulet fromage",
-];
 
 const HISTORY_TABLE = 'stock_history';
 
 function getTodayStr() {
-  const d = new Date();
+  // Tunisia is UTC+1 year-round (no DST since 2008)
+  const d = new Date(Date.now() + 60 * 60 * 1000);
   return d.toISOString().slice(0, 10);
 }
 
 function formatDate(str) {
   const [y, m, d] = str.split("-");
   return `${d}/${m}/${y}`;
+}
+
+function formatDateLong(str) {
+  const [y, m, d] = str.split('-');
+  const months = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
+  return `${parseInt(d)} ${months[parseInt(m) - 1]} ${y}`;
+}
+
+function formatTime(isoStr) {
+  const d = new Date(new Date(isoStr).getTime() + 60 * 60 * 1000);
+  return d.toISOString().slice(11, 16);
+}
+
+function getLast7Days() {
+  const days = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(Date.now() + 60 * 60 * 1000 - i * 24 * 60 * 60 * 1000);
+    days.push(d.toISOString().slice(0, 10));
+  }
+  return days;
+}
+
+function dayLabel(dateStr) {
+  const [y, m, d] = dateStr.split('-');
+  const dt = new Date(Date.UTC(parseInt(y), parseInt(m) - 1, parseInt(d)));
+  const names = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'];
+  return { day: names[dt.getUTCDay()], num: parseInt(d) };
 }
 
 // Storage helpers
@@ -54,10 +73,7 @@ async function saveDay(dateStr, data) {
 
 async function loadDay(dateStr) {
   try {
-    const result = await window.storage.get(`day:${dateStr}`);
-    if (result) {
-      return JSON.parse(result.value);
-    }
+    // Supabase is the source of truth for shared access — always try it first
     if (supabase) {
       const { data, error } = await supabase
         .from(HISTORY_TABLE)
@@ -65,17 +81,57 @@ async function loadDay(dateStr) {
         .eq('date', dateStr)
         .maybeSingle();
       if (!error && data) {
-        return {
+        const parsed = {
           items: data.items || [],
           phase: data.phase || 'opening',
           actualStock: data.actual_stock || {},
         };
+        await window.storage.set(`day:${dateStr}`, JSON.stringify(parsed));
+        return parsed;
+      }
+      if (!error && !data) {
+        // Supabase confirms no row — clear stale localStorage so it doesn't override
+        try { await window.storage.remove(`day:${dateStr}`); } catch {}
+        return null;
       }
     }
+    // Offline fallback: localStorage
+    const result = await window.storage.get(`day:${dateStr}`);
+    if (result) return JSON.parse(result.value);
     return null;
   } catch {
     return null;
   }
+}
+
+async function loadMostRecentItems(beforeDate) {
+  try {
+    const keys = await loadAllDayKeys();
+    // Only consider dates strictly before the target — never future dates
+    const dates = keys
+      .map((k) => k.replace("day:", ""))
+      .filter((d) => d < beforeDate)
+      .sort()
+      .reverse();
+    const prev = dates[0]; // most recent date before beforeDate
+    if (prev) {
+      const data = await loadDay(prev);
+      if (data?.items?.length) {
+        return data.items.map((item) => {
+          const remainder = (item.opening || 0) - (item.morningUsed || 0) - (item.afternoonUsed || 0);
+          return {
+            name: item.name,
+            unit: item.unit || "portions",
+            opening: Math.max(0, remainder),
+            morningUsed: 0,
+            afternoonUsed: 0,
+            assigned_to: item.assigned_to || null,
+          };
+        });
+      }
+    }
+  } catch {}
+  return null;
 }
 
 async function loadAllDayKeys() {
@@ -96,44 +152,91 @@ async function loadAllDayKeys() {
   }
 }
 
-export default function StockJournal() {
-  const [view, setView] = useState("today"); // today | history
+export default function StockJournal({ profile = null }) {
+  const [view, setView] = useState("today"); // today | history | utilisateurs
   const [date, setDate] = useState(getTodayStr());
   const [items, setItems] = useState([]);
   const [phase, setPhase] = useState("opening");
   const [newItemName, setNewItemName] = useState("");
+  const [newItemUnit, setNewItemUnit] = useState("portions");
+  const [newItemAssignedTo, setNewItemAssignedTo] = useState([]);
+  const [showNewAssignDropdown, setShowNewAssignDropdown] = useState(false);
+  const [editingIndex, setEditingIndex] = useState(null);
+  const [editName, setEditName] = useState("");
+  const [editUnit, setEditUnit] = useState("portions");
+  const [editAssignedTo, setEditAssignedTo] = useState([]);
+  const [showEditAssignDropdown, setShowEditAssignDropdown] = useState(false);
+
+  // User management (admin only)
+  const [cooks, setCooks] = useState([]);
+  const [showCreateCook, setShowCreateCook] = useState(false);
+  const [newCookName, setNewCookName] = useState("");
+  const [newCookEmail, setNewCookEmail] = useState("");
+  const [newCookPassword, setNewCookPassword] = useState("");
+  const [newCookShift, setNewCookShift] = useState("matin");
+  const [cookFormError, setCookFormError] = useState("");
+  const [cookFormLoading, setCookFormLoading] = useState(false);
+  const [editingCookId, setEditingCookId] = useState(null);
+  const [editCookName, setEditCookName] = useState("");
+  const [editCookEmail, setEditCookEmail] = useState("");
+  const [editCookShift, setEditCookShift] = useState("matin");
+  const [editCookPassword, setEditCookPassword] = useState("");
+  const [editCookSaving, setEditCookSaving] = useState(false);
+  const [editCookError, setEditCookError] = useState("");
+  const [cookAttendance, setCookAttendance] = useState({});
+  const [attendanceCookId, setAttendanceCookId] = useState(null);
+  const [attendanceDayDetail, setAttendanceDayDetail] = useState(null);
+
+  // Cook counts panel (admin day view)
+  const [cookCounts, setCookCounts] = useState([]);
+  const [showCookCounts, setShowCookCounts] = useState(false);
   const [loading, setLoading] = useState(true);
   const [historyKeys, setHistoryKeys] = useState([]);
   const [showAddItem, setShowAddItem] = useState(false);
   const [actualStock, setActualStock] = useState({});
   const [showVerify, setShowVerify] = useState(false);
+  const [verifyCookCounts, setVerifyCookCounts] = useState({});
+
+  // Tracks the latest load so stale async results (from Realtime or fast navigation) are discarded
+  const loadIdRef = useRef(0);
 
   // Load day data
-  const loadDayData = useCallback(async (d) => {
-    setLoading(true);
+  const loadDayData = useCallback(async (d, { silent = false } = {}) => {
+    const loadId = ++loadIdRef.current;
+    if (!silent) setLoading(true);
     const data = await loadDay(d);
+    if (loadId !== loadIdRef.current) return; // navigated away while loading
     if (data) {
       setItems(data.items || []);
       setPhase(data.phase || "opening");
       setActualStock(data.actualStock || {});
     } else {
-      setItems(
-        DEFAULT_ITEMS.map((name) => ({
-          name,
-          opening: 0,
-          morningUsed: 0,
-          afternoonUsed: 0,
-        }))
-      );
+      const prevItems = await loadMostRecentItems(d);
+      if (loadId !== loadIdRef.current) return; // navigated away while loading
+      setItems(prevItems || []);
       setPhase("opening");
       setActualStock({});
     }
-    setShowVerify(false);
-    setLoading(false);
+    if (!silent) setShowVerify(false);
+    if (!silent) setLoading(false);
   }, []);
 
   useEffect(() => {
     loadDayData(date);
+  }, [date, loadDayData]);
+
+  // Real-time sync: reload when another user saves the same day
+  useEffect(() => {
+    if (!supabase) return;
+    const channel = supabase
+      .channel(`stock_history_${date}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: HISTORY_TABLE, filter: `date=eq.${date}` },
+        () => { loadDayData(date, { silent: true }); }
+      )
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
   }, [date, loadDayData]);
 
   // Auto-save
@@ -158,8 +261,19 @@ export default function StockJournal() {
     }
   }, [view]);
 
+  // Load cooks once on mount (needed for assignment picker in today view too)
+  useEffect(() => {
+    loadCooks();
+  }, []);
+
+  // Close cook counts panel when navigating dates
+  useEffect(() => {
+    setShowCookCounts(false);
+    setCookCounts([]);
+  }, [date]);
+
   function updateItem(index, field, value) {
-    const v = Math.max(0, parseInt(value) || 0);
+    const v = Math.max(0, parseFloat(value) || 0);
     const next = items.map((item, i) =>
       i === index ? { ...item, [field]: v } : item
     );
@@ -171,10 +285,20 @@ export default function StockJournal() {
     if (!newItemName.trim()) return;
     const next = [
       ...items,
-      { name: newItemName.trim(), opening: 0, morningUsed: 0, afternoonUsed: 0 },
+      {
+        name: newItemName.trim(),
+        unit: newItemUnit,
+        opening: 0,
+        morningUsed: 0,
+        afternoonUsed: 0,
+        assigned_to: newItemAssignedTo.length > 0 ? newItemAssignedTo : null,
+      },
     ];
     setItems(next);
     setNewItemName("");
+    setNewItemUnit("portions");
+    setNewItemAssignedTo([]);
+    setShowNewAssignDropdown(false);
     setShowAddItem(false);
     save(next, phase, actualStock);
   }
@@ -183,6 +307,28 @@ export default function StockJournal() {
     const next = items.filter((_, i) => i !== index);
     setItems(next);
     save(next, phase, actualStock);
+  }
+
+  function startEdit(index) {
+    setEditingIndex(index);
+    setEditName(items[index].name);
+    setEditUnit(items[index].unit || "portions");
+    const existing = items[index].assigned_to;
+    setEditAssignedTo(Array.isArray(existing) ? existing : existing ? [existing] : []);
+    setShowEditAssignDropdown(false);
+  }
+
+  function saveEdit() {
+    if (!editName.trim()) return;
+    const next = items.map((item, i) =>
+      i === editingIndex
+        ? { ...item, name: editName.trim(), unit: editUnit, assigned_to: editAssignedTo.length > 0 ? editAssignedTo : null }
+        : item
+    );
+    setItems(next);
+    save(next, phase, actualStock);
+    setEditingIndex(null);
+    setShowEditAssignDropdown(false);
   }
 
   function advancePhase() {
@@ -210,31 +356,243 @@ export default function StockJournal() {
   }
 
   function updateActual(itemName, value) {
-    const v = Math.max(0, parseInt(value) || 0);
+    const v = Math.max(0, parseFloat(value) || 0);
     const next = { ...actualStock, [itemName]: v };
     setActualStock(next);
     save(items, phase, next);
   }
 
-  function toggleVerify() {
+  async function toggleVerify() {
     if (!showVerify) {
-      // Pre-fill actual with expected
-      const prefill = {};
-      items.forEach((item) => {
-        if (actualStock[item.name] === undefined) {
-          prefill[item.name] = getRemaining(item, phase);
-        } else {
-          prefill[item.name] = actualStock[item.name];
-        }
-      });
-      setActualStock(prefill);
-      save(items, phase, prefill);
+      const { data } = await supabase
+        .from('cook_counts')
+        .select('item_name, count, cook_id, submitted_at')
+        .eq('date', date)
+        .order('submitted_at', { ascending: false });
+      if (data) {
+        // phase midday = ventes du matin → matin + journée cooks
+        // phase closing = ventes de l'après-midi → après-midi + journée cooks
+        const relevantShifts = phase === 'midday'
+          ? ['matin', 'journée']
+          : ['après-midi', 'journée'];
+
+        // null/undefined shift defaults to 'matin' (created before migration)
+        // If cooks haven't loaded yet, skip shift filter and include everyone
+        const relevantCookIds = cooks.length > 0
+          ? new Set(cooks.filter(c => relevantShifts.includes(c.shift || 'matin')).map(c => c.id))
+          : null; // null = no filter
+
+        // Most recent submission per (cook, item), sum only relevant-shift cooks
+        const seen = new Set();
+        const totals = {};
+        data.forEach(row => {
+          if (relevantCookIds && !relevantCookIds.has(row.cook_id)) return;
+          const key = `${row.cook_id}:${row.item_name}`;
+          if (!seen.has(key)) {
+            seen.add(key);
+            totals[row.item_name] = (totals[row.item_name] || 0) + Number(row.count);
+          }
+        });
+        setVerifyCookCounts(totals);
+      }
     }
-    setShowVerify(!showVerify);
+    setShowVerify(prev => !prev);
   }
 
-  function deleteHistoryEntry(dateStr) {
+  async function deleteHistoryEntry(dateStr) {
     setHistoryKeys((prev) => prev.filter((d) => d !== dateStr));
+    try {
+      await window.storage.remove(`day:${dateStr}`);
+    } catch {}
+    try {
+      if (supabase) {
+        await supabase.from(HISTORY_TABLE).delete().eq('date', dateStr);
+      }
+    } catch (e) {
+      console.error("Delete failed", e);
+    }
+  }
+
+  async function loadCooks() {
+    const { data } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('role', 'cook')
+      .order('created_at');
+    if (data) setCooks(data);
+  }
+
+  async function createCook() {
+    if (!newCookName.trim() || !newCookEmail.trim() || !newCookPassword.trim()) {
+      setCookFormError("Tous les champs sont requis.");
+      return;
+    }
+    setCookFormLoading(true);
+    setCookFormError("");
+
+    // Use a separate client instance so signing up the cook does not disturb
+    // the current admin session (persistSession: false keeps it isolated)
+    const tempClient = createClient(
+      import.meta.env.VITE_SUPABASE_URL,
+      import.meta.env.VITE_SUPABASE_ANON_KEY,
+      { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } }
+    );
+
+    let userId = null;
+
+    const { data: signUpData, error: signUpError } = await tempClient.auth.signUp({
+      email: newCookEmail.trim().toLowerCase(),
+      password: newCookPassword,
+    });
+
+    if (signUpError) {
+      // Auth user exists but profile was never created — recover by signing in to get the UUID
+      if (signUpError.message.toLowerCase().includes('already registered')) {
+        const { data: signInData, error: signInError } = await tempClient.auth.signInWithPassword({
+          email: newCookEmail.trim().toLowerCase(),
+          password: newCookPassword,
+        });
+        if (signInError || !signInData?.user?.id) {
+          setCookFormError("Ce compte existe déjà avec un mot de passe différent. Supprimez-le depuis Supabase Dashboard → Authentication → Users puis réessayez.");
+          setCookFormLoading(false);
+          return;
+        }
+        userId = signInData.user.id;
+      } else {
+        setCookFormError("Erreur : " + signUpError.message);
+        setCookFormLoading(false);
+        return;
+      }
+    } else {
+      userId = signUpData?.user?.id;
+    }
+
+    if (!userId) {
+      setCookFormError(
+        "Impossible de créer le compte. Désactivez la confirmation d'email dans les paramètres Supabase (Auth → Settings)."
+      );
+      setCookFormLoading(false);
+      return;
+    }
+
+    const { error: profileError } = await supabase.from('profiles').insert({
+      id: userId,
+      role: 'cook',
+      full_name: newCookName.trim(),
+      email: newCookEmail.trim().toLowerCase(),
+      shift: newCookShift,
+      password_plain: newCookPassword,
+    });
+
+    if (profileError) {
+      setCookFormError("Profil non créé : " + profileError.message);
+      setCookFormLoading(false);
+      return;
+    }
+
+    setNewCookName("");
+    setNewCookEmail("");
+    setNewCookPassword("");
+    setNewCookShift("matin");
+    setShowCreateCook(false);
+    await loadCooks();
+    setCookFormLoading(false);
+  }
+
+  async function deleteCook(id) {
+    if (editingCookId === id) setEditingCookId(null);
+    if (attendanceCookId === id) setAttendanceCookId(null);
+    setCooks((prev) => prev.filter((c) => c.id !== id));
+    await supabase.from('profiles').delete().eq('id', id);
+  }
+
+  function startEditCook(cook) {
+    setEditingCookId(cook.id);
+    setEditCookName(cook.full_name);
+    setEditCookEmail(cook.email);
+    setEditCookShift(cook.shift || 'matin');
+    setEditCookPassword(cook.password_plain || '');
+    setEditCookError('');
+  }
+
+  function cancelEditCook() {
+    setEditingCookId(null);
+    setEditCookError('');
+  }
+
+  async function saveCook() {
+    if (!editCookName.trim()) { setEditCookError("Le nom est requis."); return; }
+    setEditCookSaving(true);
+    setEditCookError('');
+    const { error } = await supabase.from('profiles').update({
+      full_name: editCookName.trim(),
+      email: editCookEmail.trim().toLowerCase(),
+      shift: editCookShift,
+      password_plain: editCookPassword,
+    }).eq('id', editingCookId);
+    if (error) {
+      setEditCookError("Erreur : " + error.message);
+    } else {
+      await loadCooks();
+      setEditingCookId(null);
+    }
+    setEditCookSaving(false);
+  }
+
+  async function loadAttendance() {
+    const last7 = getLast7Days();
+    const { data } = await supabase
+      .from('cook_counts')
+      .select('cook_id, date')
+      .in('date', last7);
+    const map = {};
+    (data || []).forEach(row => {
+      if (!map[row.cook_id]) map[row.cook_id] = new Set();
+      map[row.cook_id].add(row.date);
+    });
+    setCookAttendance(map);
+  }
+
+  async function loadAttendanceDayDetail(cookId, date) {
+    if (attendanceDayDetail && attendanceDayDetail.cookId === cookId && attendanceDayDetail.date === date) {
+      setAttendanceDayDetail(null);
+      return;
+    }
+    setAttendanceDayDetail({ cookId, date, loading: true, items: [], submittedAt: '' });
+    const { data } = await supabase
+      .from('cook_counts')
+      .select('item_name, count, unit, submitted_at')
+      .eq('cook_id', cookId)
+      .eq('date', date)
+      .order('submitted_at', { ascending: false });
+    if (!data || data.length === 0) {
+      setAttendanceDayDetail({ cookId, date, loading: false, items: [], submittedAt: '' });
+      return;
+    }
+    const latestAt = data[0].submitted_at;
+    const items = data
+      .filter(r => r.submitted_at === latestAt)
+      .map(r => ({ name: r.item_name, count: r.count, unit: r.unit }));
+    setAttendanceDayDetail({ cookId, date, loading: false, items, submittedAt: latestAt });
+  }
+
+  async function toggleCookCounts() {
+    if (!showCookCounts) {
+      const { data } = await supabase
+        .from('cook_counts')
+        .select('*, profiles(full_name, shift)')
+        .eq('date', date)
+        .order('submitted_at', { ascending: false });
+      if (data) {
+        const relevantShifts = phase === 'midday'
+          ? ['matin', 'journée']
+          : ['après-midi', 'journée'];
+        setCookCounts(data.filter(row =>
+          relevantShifts.includes(row.profiles?.shift || 'matin')
+        ));
+      }
+    }
+    setShowCookCounts((prev) => !prev);
   }
 
   // Styles
@@ -495,6 +853,41 @@ export default function StockJournal() {
       padding: "4px 8px",
       lineHeight: 1,
     },
+    logoutBtn: {
+      background: "rgba(255,255,255,0.12)",
+      border: "none",
+      color: "#fff",
+      padding: "6px 12px",
+      borderRadius: 6,
+      fontSize: 13,
+      cursor: "pointer",
+      fontFamily: "inherit",
+    },
+    userCard: {
+      padding: "14px 16px",
+      background: colors.card,
+      borderBottom: "1px solid " + colors.border,
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+    },
+    cookFormField: {
+      width: "100%",
+      padding: "10px 12px",
+      boxSizing: "border-box",
+      border: "1px solid " + colors.border,
+      borderRadius: 8,
+      fontSize: 14,
+      fontFamily: "inherit",
+      marginBottom: 10,
+    },
+    cookCountGroup: {
+      background: colors.card,
+      borderRadius: 10,
+      padding: "12px 14px",
+      marginBottom: 8,
+      border: "1px solid " + colors.border,
+    },
   };
 
   if (loading) {
@@ -517,6 +910,9 @@ export default function StockJournal() {
       <div style={s.header}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <h1 style={s.title}>Journal de Stock</h1>
+          <button style={s.logoutBtn} onClick={() => supabase.auth.signOut()}>
+            Se déconnecter
+          </button>
         </div>
         <div style={s.dateRow}>
           <input
@@ -529,10 +925,13 @@ export default function StockJournal() {
         </div>
         <div style={s.tabs}>
           <button style={s.tab(view === "today")} onClick={() => setView("today")}>
-            Aujourd'hui
+            {date === getTodayStr() ? "Aujourd'hui" : formatDate(date)}
           </button>
           <button style={s.tab(view === "history")} onClick={() => setView("history")}>
             Historique
+          </button>
+          <button style={s.tab(view === "utilisateurs")} onClick={() => setView("utilisateurs")}>
+            Personnel
           </button>
         </div>
       </div>
@@ -570,6 +969,320 @@ export default function StockJournal() {
             ))
           )}
         </div>
+      ) : view === "utilisateurs" ? (
+        /* ── Utilisateurs (admin user management) ── */
+        <div>
+          {/* Cook list */}
+          {cooks.length === 0 ? (
+            <p style={{ padding: 24, textAlign: "center", color: colors.textMuted }}>
+              Aucun cuisinier enregistré.
+            </p>
+          ) : (
+            cooks.map((cook) => (
+              <div key={cook.id} style={{ borderBottom: "1px solid " + colors.border }}>
+                {/* Cook card row */}
+                <div style={{ ...s.userCard, borderBottom: "none" }}>
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: 15 }}>{cook.full_name}</div>
+                    <div style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>
+                      {cook.email}
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                      <span style={{
+                        fontSize: 11, fontWeight: 600, padding: '2px 8px',
+                        background: colors.accentLight, color: colors.accent,
+                        borderRadius: 20,
+                      }}>
+                        {cook.shift === 'après-midi' ? 'Après-midi' : cook.shift === 'journée' ? 'Journée' : 'Matin'}
+                      </span>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button
+                      title="Comptage"
+                      style={{ ...s.deleteBtn, fontSize: 12, fontWeight: 700, color: attendanceCookId === cook.id ? colors.accent : colors.textMuted }}
+                      onClick={() => {
+                        const opening = attendanceCookId !== cook.id;
+                        setAttendanceCookId(opening ? cook.id : null);
+                        if (opening && Object.keys(cookAttendance).length === 0) loadAttendance();
+                      }}
+                    >
+                      {attendanceCookId === cook.id ? '▲' : '▼'}
+                    </button>
+                    <button
+                      style={{ ...s.deleteBtn, fontSize: 15, color: editingCookId === cook.id ? colors.accent : undefined }}
+                      onClick={() => editingCookId === cook.id ? cancelEditCook() : startEditCook(cook)}
+                    >
+                      {editingCookId === cook.id ? '✕' : '✎'}
+                    </button>
+                    <button style={s.deleteBtn} onClick={() => deleteCook(cook.id)}>🗑</button>
+                  </div>
+                </div>
+
+                {/* Per-cook attendance grid */}
+                {attendanceCookId === cook.id && (() => {
+                  const last7 = getLast7Days();
+                  const today = getTodayStr();
+                  const detail = attendanceDayDetail && attendanceDayDetail.cookId === cook.id ? attendanceDayDetail : null;
+                  return (
+                    <div style={{ background: colors.bg, borderTop: '1px solid ' + colors.border }}>
+                      <div style={{ padding: '10px 16px 0' }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>
+                          Comptage — 7 derniers jours
+                        </div>
+                        <div style={{ overflowX: 'auto' }}>
+                          <table style={{ borderCollapse: 'collapse', fontSize: 13, width: '100%' }}>
+                            <thead>
+                              <tr>
+                                {last7.map(d => {
+                                  const { day, num } = dayLabel(d);
+                                  const isToday = d === today;
+                                  return (
+                                    <th key={d} style={{ textAlign: 'center', padding: '4px 6px', fontWeight: 600, color: isToday ? colors.accent : colors.textMuted, fontSize: 11, minWidth: 36 }}>
+                                      <div>{day}</div>
+                                      <div style={{ fontSize: 12, fontWeight: isToday ? 700 : 400 }}>{num}</div>
+                                    </th>
+                                  );
+                                })}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              <tr>
+                                {last7.map(d => {
+                                  const did = cookAttendance[cook.id]?.has(d);
+                                  const isToday = d === today;
+                                  const isSelected = detail && detail.date === d;
+                                  return (
+                                    <td key={d} style={{ textAlign: 'center', padding: '4px 6px' }}>
+                                      {did ? (
+                                        <button
+                                          onClick={() => loadAttendanceDayDetail(cook.id, d)}
+                                          title="Voir le détail"
+                                          style={{
+                                            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                            width: 32, height: 32, borderRadius: '50%', fontSize: 14, fontWeight: 700,
+                                            background: isSelected ? colors.green : colors.greenBg,
+                                            color: isSelected ? '#fff' : colors.green,
+                                            border: isSelected ? '2px solid ' + colors.green : '2px solid transparent',
+                                            cursor: 'pointer', transition: 'all 0.15s',
+                                          }}
+                                        >
+                                          ✓
+                                        </button>
+                                      ) : (
+                                        <span style={{
+                                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                          width: 32, height: 32, borderRadius: '50%', fontSize: 14, fontWeight: 700,
+                                          background: isToday ? colors.accentLight : colors.card,
+                                          color: colors.border,
+                                          border: '2px solid ' + colors.border,
+                                        }}>
+                                          ✗
+                                        </span>
+                                      )}
+                                    </td>
+                                  );
+                                })}
+                              </tr>
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+
+                      {/* Day detail panel */}
+                      {detail && (
+                        <div style={{
+                          margin: '10px 16px 14px',
+                          background: colors.card,
+                          border: '1px solid ' + colors.green + '44',
+                          borderRadius: 10,
+                          overflow: 'hidden',
+                        }}>
+                          <div style={{
+                            padding: '8px 12px',
+                            background: colors.greenBg,
+                            borderBottom: '1px solid ' + colors.green + '33',
+                            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                          }}>
+                            <span style={{ fontWeight: 700, fontSize: 13, color: colors.green }}>
+                              {formatDateLong(detail.date)}
+                            </span>
+                            {detail.loading ? (
+                              <span style={{ fontSize: 12, color: colors.textMuted }}>Chargement...</span>
+                            ) : detail.submittedAt ? (
+                              <span style={{ fontSize: 12, color: colors.textMuted }}>
+                                soumis à {formatTime(detail.submittedAt)}
+                              </span>
+                            ) : null}
+                          </div>
+                          {!detail.loading && detail.items.length > 0 && detail.items.map((item, i) => (
+                            <div key={item.name} style={{
+                              padding: '8px 12px',
+                              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                              borderBottom: i < detail.items.length - 1 ? '1px solid ' + colors.border + '88' : 'none',
+                            }}>
+                              <span style={{ fontSize: 13, color: colors.text }}>{item.name}</span>
+                              <span style={{ fontSize: 13, fontWeight: 700, color: colors.accent }}>
+                                {item.count}
+                                <span style={{ fontSize: 11, fontWeight: 400, color: colors.textMuted, marginLeft: 4 }}>
+                                  {item.unit === 'kg' ? 'KG' : item.unit === 'l' ? 'L' : 'Portions'}
+                                </span>
+                              </span>
+                            </div>
+                          ))}
+                          {!detail.loading && detail.items.length === 0 && (
+                            <div style={{ padding: '10px 12px', fontSize: 13, color: colors.textMuted, textAlign: 'center' }}>
+                              Aucune donnée trouvée.
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {!detail && <div style={{ height: 14 }} />}
+                    </div>
+                  );
+                })()}
+
+                {/* Inline edit form */}
+                {editingCookId === cook.id && (
+                  <div style={{ padding: '0 16px 16px', background: colors.bg, borderTop: '1px solid ' + colors.border }}>
+                    <div style={{ paddingTop: 12 }}>
+                      <input
+                        type="text"
+                        placeholder="Nom complet"
+                        value={editCookName}
+                        onChange={(e) => setEditCookName(e.target.value)}
+                        style={s.cookFormField}
+                      />
+                      <input
+                        type="email"
+                        placeholder="Email"
+                        value={editCookEmail}
+                        onChange={(e) => setEditCookEmail(e.target.value)}
+                        style={s.cookFormField}
+                      />
+                      <select
+                        value={editCookShift}
+                        onChange={(e) => setEditCookShift(e.target.value)}
+                        style={{ ...s.cookFormField, cursor: 'pointer' }}
+                      >
+                        <option value="matin">Matin</option>
+                        <option value="après-midi">Après-midi</option>
+                        <option value="journée">Journée complète</option>
+                      </select>
+                      <div style={{ position: 'relative' }}>
+                        <input
+                          type="text"
+                          placeholder="Mot de passe"
+                          value={editCookPassword}
+                          onChange={(e) => setEditCookPassword(e.target.value)}
+                          style={{ ...s.cookFormField, fontFamily: 'monospace', letterSpacing: 1 }}
+                        />
+                      </div>
+                      {editCookError && (
+                        <div style={{ background: colors.redBg, color: colors.red, borderRadius: 8, padding: "8px 12px", fontSize: 13, marginBottom: 10 }}>
+                          {editCookError}
+                        </div>
+                      )}
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button
+                          style={{ ...s.confirmBtn, flex: 1, opacity: editCookSaving ? 0.6 : 1 }}
+                          onClick={saveCook}
+                          disabled={editCookSaving}
+                        >
+                          {editCookSaving ? 'Enregistrement...' : 'Enregistrer'}
+                        </button>
+                        <button
+                          style={{ padding: "10px 14px", border: "1px solid " + colors.border, borderRadius: 8, background: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 14 }}
+                          onClick={cancelEditCook}
+                        >
+                          Annuler
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))
+          )}
+
+          {/* Create cook form */}
+          <div style={{ padding: "16px 16px" }}>
+            {showCreateCook ? (
+              <div style={{
+                background: colors.card,
+                border: "1px solid " + colors.border,
+                borderRadius: 12,
+                padding: 16,
+              }}>
+                <div style={{ fontWeight: 600, marginBottom: 12, fontSize: 14 }}>
+                  Nouveau cuisinier
+                </div>
+                <input
+                  type="text"
+                  placeholder="Nom complet"
+                  value={newCookName}
+                  onChange={(e) => setNewCookName(e.target.value)}
+                  style={s.cookFormField}
+                />
+                <input
+                  type="email"
+                  placeholder="Email"
+                  value={newCookEmail}
+                  onChange={(e) => setNewCookEmail(e.target.value)}
+                  style={s.cookFormField}
+                />
+                <input
+                  type="password"
+                  placeholder="Mot de passe temporaire"
+                  value={newCookPassword}
+                  onChange={(e) => setNewCookPassword(e.target.value)}
+                  style={s.cookFormField}
+                />
+                <select
+                  value={newCookShift}
+                  onChange={(e) => setNewCookShift(e.target.value)}
+                  style={{ ...s.cookFormField, cursor: 'pointer' }}
+                >
+                  <option value="matin">Matin</option>
+                  <option value="après-midi">Après-midi</option>
+                  <option value="journée">Journée complète</option>
+                </select>
+                {cookFormError && (
+                  <div style={{
+                    background: colors.redBg, color: colors.red,
+                    borderRadius: 8, padding: "8px 12px", fontSize: 13, marginBottom: 10,
+                  }}>
+                    {cookFormError}
+                  </div>
+                )}
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    style={{ ...s.confirmBtn, flex: 1, opacity: cookFormLoading ? 0.6 : 1 }}
+                    onClick={createCook}
+                    disabled={cookFormLoading}
+                  >
+                    {cookFormLoading ? "Création..." : "Créer le compte"}
+                  </button>
+                  <button
+                    style={{
+                      padding: "10px 16px", border: "1px solid " + colors.border,
+                      borderRadius: 8, background: "none", cursor: "pointer",
+                      fontFamily: "inherit", fontSize: 14,
+                    }}
+                    onClick={() => { setShowCreateCook(false); setCookFormError(""); }}
+                  >
+                    Annuler
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button style={s.addBtn} onClick={() => setShowCreateCook(true)}>
+                + Ajouter un cuisinier
+              </button>
+            )}
+          </div>
+        </div>
       ) : (
         <>
           {/* Phase bar */}
@@ -599,7 +1312,7 @@ export default function StockJournal() {
           <div style={s.summaryBar}>
             <div style={s.summaryText}>
               <span>{totalItems} articles</span>
-              <span>Nombre de portions: {totalOpening}</span>
+              <span>Stock total: {totalOpening}</span>
               {phase !== "opening" && <span>Vendu matin: {totalMorningSold}</span>}
               {phase === "closing" && <span>Vendu après-midi: {totalAfternoonSold}</span>}
             </div>
@@ -614,21 +1327,150 @@ export default function StockJournal() {
               return (
                 <div key={i} style={s.itemCard}>
                   <div style={s.itemHeader}>
-                    <span style={s.itemName}>{item.name}</span>
-                    {phase === "opening" && (
-                      <button style={s.removeBtn} onClick={() => removeItem(i)}>
-                        ×
-                      </button>
+                    {editingIndex === i ? (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6, width: "100%" }}>
+                        <div style={{ display: "flex", gap: 6 }}>
+                          <input
+                            type="text"
+                            value={editName}
+                            onChange={(e) => setEditName(e.target.value)}
+                            onKeyDown={(e) => e.key === "Enter" && saveEdit()}
+                            style={{ ...s.addInput, flex: 1, fontSize: 14, padding: "6px 10px" }}
+                            autoFocus
+                          />
+                          <button style={s.confirmBtn} onClick={saveEdit}>✓</button>
+                          <button
+                            style={{ ...s.removeBtn, fontSize: 14, padding: "4px 8px" }}
+                            onClick={() => setEditingIndex(null)}
+                          >✕</button>
+                        </div>
+                        <div style={{ display: "flex", gap: 6 }}>
+                          {[
+                            { value: "portions", label: "Portions" },
+                            { value: "kg", label: "KG" },
+                            { value: "l", label: "L" },
+                          ].map(({ value, label }) => (
+                            <button
+                              key={value}
+                              onClick={() => setEditUnit(value)}
+                              style={{
+                                flex: 1,
+                                padding: "6px 0",
+                                border: "1px solid " + (editUnit === value ? colors.accent : colors.border),
+                                borderRadius: 8,
+                                background: editUnit === value ? colors.accentLight : "#fff",
+                                color: editUnit === value ? colors.accent : colors.textMuted,
+                                fontWeight: editUnit === value ? 700 : 400,
+                                fontSize: 13,
+                                cursor: "pointer",
+                                fontFamily: "inherit",
+                              }}
+                            >
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+                        {cooks.length > 0 && (
+                          <div style={{ position: 'relative' }}>
+                            <div style={{ fontSize: 11, color: colors.textMuted, fontWeight: 600, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Personnel assigné</div>
+                            <button
+                              type="button"
+                              onClick={() => setShowEditAssignDropdown(prev => !prev)}
+                              style={{
+                                width: '100%', padding: '8px 12px', background: '#fff',
+                                border: '1px solid ' + (showEditAssignDropdown ? colors.accent : colors.border),
+                                borderRadius: showEditAssignDropdown ? '8px 8px 0 0' : 8,
+                                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                                cursor: 'pointer', fontFamily: 'inherit', fontSize: 13, color: colors.text,
+                              }}
+                            >
+                              <span style={{ color: editAssignedTo.length === 0 ? colors.textMuted : colors.text }}>
+                                {editAssignedTo.length === 0
+                                  ? 'Aucun'
+                                  : editAssignedTo.map(id => cooks.find(c => c.id === id)?.full_name).filter(Boolean).join(', ')}
+                              </span>
+                              <span style={{ fontSize: 11, color: colors.textMuted }}>{showEditAssignDropdown ? '▲' : '▼'}</span>
+                            </button>
+                            {showEditAssignDropdown && (
+                              <div style={{
+                                position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10,
+                                background: '#fff', border: '1px solid ' + colors.accent,
+                                borderTop: 'none', borderRadius: '0 0 8px 8px',
+                                boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                              }}>
+                                {cooks.map((c, ci) => {
+                                  const selected = editAssignedTo.includes(c.id);
+                                  return (
+                                    <div
+                                      key={c.id}
+                                      onClick={() => setEditAssignedTo(prev => selected ? prev.filter(id => id !== c.id) : [...prev, c.id])}
+                                      style={{
+                                        padding: '9px 12px', cursor: 'pointer', fontSize: 13,
+                                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                                        background: selected ? colors.accentLight : '#fff',
+                                        borderTop: ci > 0 ? '1px solid ' + colors.border : 'none',
+                                      }}
+                                    >
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                        <span style={{
+                                          width: 18, height: 18, borderRadius: 4, border: '2px solid ' + (selected ? colors.accent : colors.border),
+                                          background: selected ? colors.accent : '#fff',
+                                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                          flexShrink: 0,
+                                        }}>
+                                          {selected && <span style={{ color: '#fff', fontSize: 11, lineHeight: 1 }}>✓</span>}
+                                        </span>
+                                        <span style={{ fontWeight: selected ? 600 : 400 }}>{c.full_name}</span>
+                                      </div>
+                                      <span style={{ fontSize: 11, color: colors.accent, fontWeight: 600 }}>
+                                        {c.shift === 'après-midi' ? 'AM' : c.shift === 'journée' ? 'Jour.' : 'Mat.'}
+                                      </span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <span style={s.itemName}>{item.name}</span>
+                          {item.assigned_to && (() => {
+                            const ids = Array.isArray(item.assigned_to) ? item.assigned_to : [item.assigned_to];
+                            const names = ids.map(id => cooks.find(c => c.id === id)?.full_name).filter(Boolean);
+                            return names.length > 0 ? (
+                              <div style={{ fontSize: 11, color: colors.accent, marginTop: 2, fontWeight: 600 }}>
+                                👤 {names.join(', ')}
+                              </div>
+                            ) : null;
+                          })()}
+                        </div>
+                        {phase === "opening" && (
+                          <div style={{ display: "flex", gap: 4 }}>
+                            <button style={{ ...s.removeBtn, fontSize: 15 }} onClick={() => startEdit(i)}>
+                              ✎
+                            </button>
+                            <button style={s.removeBtn} onClick={() => removeItem(i)}>
+                              ×
+                            </button>
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
 
                   {/* Opening stock */}
                   <div style={s.row}>
-                    <span style={s.label}>Nombre de portions</span>
+                    <span style={s.label}>
+                      {`Quantité de départ (${item.unit === "kg" ? "KG" : item.unit === "l" ? "L" : "Portions"})`}
+                    </span>
                     <input
                       type="number"
-                      inputMode="numeric"
+                      inputMode="decimal"
                       min="0"
+                      step="any"
                       value={item.opening || ""}
                       onChange={(e) => updateItem(i, "opening", e.target.value)}
                       style={s.input(phase === "opening")}
@@ -642,8 +1484,9 @@ export default function StockJournal() {
                       <span style={s.label}>Vendu matin</span>
                       <input
                         type="number"
-                        inputMode="numeric"
+                        inputMode="decimal"
                         min="0"
+                        step="any"
                         value={item.morningUsed || ""}
                         onChange={(e) => updateItem(i, "morningUsed", e.target.value)}
                         style={s.input(phase === "midday")}
@@ -661,8 +1504,9 @@ export default function StockJournal() {
                       <span style={s.label}>Vendu après-midi</span>
                       <input
                         type="number"
-                        inputMode="numeric"
+                        inputMode="decimal"
                         min="0"
+                        step="any"
                         value={item.afternoonUsed || ""}
                         onChange={(e) => updateItem(i, "afternoonUsed", e.target.value)}
                         style={s.input(phase === "closing")}
@@ -681,19 +1525,109 @@ export default function StockJournal() {
           {/* Add item */}
           <div style={s.addArea}>
             {showAddItem ? (
-              <div style={s.addRow}>
-                <input
-                  type="text"
-                  value={newItemName}
-                  onChange={(e) => setNewItemName(e.target.value)}
-                  placeholder="Nom de l'article..."
-                  style={s.addInput}
-                  onKeyDown={(e) => e.key === "Enter" && addItem()}
-                  autoFocus
-                />
-                <button style={s.confirmBtn} onClick={addItem}>
-                  Ajouter
-                </button>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <div style={s.addRow}>
+                  <input
+                    type="text"
+                    value={newItemName}
+                    onChange={(e) => setNewItemName(e.target.value)}
+                    placeholder="Nom de l'article..."
+                    style={s.addInput}
+                    onKeyDown={(e) => e.key === "Enter" && addItem()}
+                    autoFocus
+                  />
+                  <button style={s.confirmBtn} onClick={addItem}>
+                    Ajouter
+                  </button>
+                </div>
+                <div style={{ display: "flex", gap: 6 }}>
+                  {[
+                    { value: "portions", label: "Portions" },
+                    { value: "kg", label: "KG" },
+                    { value: "l", label: "L" },
+                  ].map(({ value, label }) => (
+                    <button
+                      key={value}
+                      onClick={() => setNewItemUnit(value)}
+                      style={{
+                        flex: 1,
+                        padding: "8px 0",
+                        border: "1px solid " + (newItemUnit === value ? colors.accent : colors.border),
+                        borderRadius: 8,
+                        background: newItemUnit === value ? colors.accentLight : "#fff",
+                        color: newItemUnit === value ? colors.accent : colors.textMuted,
+                        fontWeight: newItemUnit === value ? 700 : 400,
+                        fontSize: 14,
+                        cursor: "pointer",
+                        fontFamily: "inherit",
+                      }}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                {cooks.length > 0 && (
+                  <div style={{ position: 'relative' }}>
+                    <div style={{ fontSize: 11, color: colors.textMuted, fontWeight: 600, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Personnel assigné</div>
+                    <button
+                      type="button"
+                      onClick={() => setShowNewAssignDropdown(prev => !prev)}
+                      style={{
+                        width: '100%', padding: '8px 12px', background: '#fff',
+                        border: '1px solid ' + (showNewAssignDropdown ? colors.accent : colors.border),
+                        borderRadius: showNewAssignDropdown ? '8px 8px 0 0' : 8,
+                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                        cursor: 'pointer', fontFamily: 'inherit', fontSize: 13, color: colors.text,
+                      }}
+                    >
+                      <span style={{ color: newItemAssignedTo.length === 0 ? colors.textMuted : colors.text }}>
+                        {newItemAssignedTo.length === 0
+                          ? 'Aucun'
+                          : newItemAssignedTo.map(id => cooks.find(c => c.id === id)?.full_name).filter(Boolean).join(', ')}
+                      </span>
+                      <span style={{ fontSize: 11, color: colors.textMuted }}>{showNewAssignDropdown ? '▲' : '▼'}</span>
+                    </button>
+                    {showNewAssignDropdown && (
+                      <div style={{
+                        position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10,
+                        background: '#fff', border: '1px solid ' + colors.accent,
+                        borderTop: 'none', borderRadius: '0 0 8px 8px',
+                        boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                      }}>
+                        {cooks.map((c, ci) => {
+                          const selected = newItemAssignedTo.includes(c.id);
+                          return (
+                            <div
+                              key={c.id}
+                              onClick={() => setNewItemAssignedTo(prev => selected ? prev.filter(id => id !== c.id) : [...prev, c.id])}
+                              style={{
+                                padding: '9px 12px', cursor: 'pointer', fontSize: 13,
+                                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                                background: selected ? colors.accentLight : '#fff',
+                                borderTop: ci > 0 ? '1px solid ' + colors.border : 'none',
+                              }}
+                            >
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <span style={{
+                                  width: 18, height: 18, borderRadius: 4, border: '2px solid ' + (selected ? colors.accent : colors.border),
+                                  background: selected ? colors.accent : '#fff',
+                                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                  flexShrink: 0,
+                                }}>
+                                  {selected && <span style={{ color: '#fff', fontSize: 11, lineHeight: 1 }}>✓</span>}
+                                </span>
+                                <span style={{ fontWeight: selected ? 600 : 400 }}>{c.full_name}</span>
+                              </div>
+                              <span style={{ fontSize: 11, color: colors.accent, fontWeight: 600 }}>
+                                {c.shift === 'après-midi' ? 'AM' : c.shift === 'journée' ? 'Jour.' : 'Mat.'}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             ) : (
               <button style={s.addBtn} onClick={() => setShowAddItem(true)}>
@@ -702,9 +1636,10 @@ export default function StockJournal() {
             )}
           </div>
 
-          {/* Verify actual stock */}
+          {/* Cook counts + Verify — shown below items in midday/closing */}
           {phase !== "opening" && (
             <>
+              {/* Verify actual stock */}
               <button style={s.verifyBtn} onClick={toggleVerify}>
                 {showVerify ? "Masquer la vérification" : "Vérifier le stock réel"}
               </button>
@@ -712,110 +1647,141 @@ export default function StockJournal() {
               {showVerify && (
                 <div style={{ padding: "0 16px 16px" }}>
                   <p style={{ fontSize: 13, color: colors.textMuted, marginBottom: 10 }}>
-                    Comptez le stock réel et saisissez les quantités. Les écarts apparaîtront
-                    automatiquement.
+                    Comptage des cuisiniers du {phase === 'midday' ? 'matin' : 'soir'} vs stock attendu.
                   </p>
+                  <div style={{ display: "flex", justifyContent: "space-between", padding: "0 14px 6px", fontSize: 11, fontWeight: 600, color: colors.textMuted, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                    <span>Article</span>
+                    <div style={{ display: "flex", gap: 24, textAlign: "right" }}>
+                      <span style={{ width: 56 }}>Reste prévu</span>
+                      <span style={{ width: 56 }}>En cuisine</span>
+                      <span style={{ width: 40 }}>Écart</span>
+                    </div>
+                  </div>
                   {items.map((item, i) => {
                     const expected = getRemaining(item, phase);
-                    const actual =
-                      actualStock[item.name] !== undefined
-                        ? actualStock[item.name]
-                        : expected;
-                    const diff = actual - expected;
-
+                    const hasCookCount = verifyCookCounts[item.name] !== undefined;
+                    const cookCount = hasCookCount ? verifyCookCounts[item.name] : null;
+                    const diff = hasCookCount ? cookCount - expected : null;
+                    const matches = diff === 0;
                     return (
-                      <div key={i} style={s.verifyCard(diff)}>
-                        <div
-                          style={{
-                            display: "flex",
-                            justifyContent: "space-between",
-                            alignItems: "center",
-                          }}
-                        >
-                          <div>
-                            <div style={{ fontWeight: 600, fontSize: 14 }}>{item.name}</div>
-                            <div style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>
-                              Attendu: {expected}
-                            </div>
-                          </div>
-                          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                            <input
-                              type="number"
-                              inputMode="numeric"
-                              min="0"
-                              value={actual}
-                              onChange={(e) => updateActual(item.name, e.target.value)}
-                              style={{
-                                ...s.input(true),
-                                width: 56,
-                                background: diff === 0 ? colors.greenBg : colors.redBg,
-                                borderColor: diff === 0 ? colors.green : colors.red,
-                              }}
-                            />
-                            <span style={s.diffBadge(diff)}>
-                              {diff === 0 ? "✓" : diff > 0 ? `+${diff}` : diff}
+                      <div key={i} style={{
+                        ...s.verifyCard(hasCookCount ? diff : 0),
+                        background: !hasCookCount ? colors.card : matches ? colors.greenBg : colors.redBg,
+                        border: "1px solid " + (!hasCookCount ? colors.border : matches ? colors.green + "33" : colors.red + "33"),
+                      }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                          <div style={{ fontWeight: 600, fontSize: 14 }}>{item.name}</div>
+                          <div style={{ display: "flex", gap: 24, alignItems: "center", textAlign: "right" }}>
+                            <span style={{ width: 56, fontSize: 15, fontWeight: 700, color: colors.text }}>{expected}</span>
+                            <span style={{ width: 56, fontSize: 15, fontWeight: 700, color: hasCookCount ? colors.text : colors.textMuted }}>
+                              {hasCookCount ? cookCount : "—"}
+                            </span>
+                            <span style={{ width: 40, ...s.diffBadge(diff ?? 0), color: !hasCookCount ? colors.textMuted : matches ? colors.green : colors.red }}>
+                              {!hasCookCount ? "—" : matches ? "✓" : diff > 0 ? `+${diff}` : diff}
                             </span>
                           </div>
                         </div>
                       </div>
                     );
                   })}
-
-                  {/* Summary of discrepancies */}
                   {(() => {
-                    const discrepancies = items.filter((item) => {
-                      const expected = getRemaining(item, phase);
-                      const actual =
-                        actualStock[item.name] !== undefined
-                          ? actualStock[item.name]
-                          : expected;
-                      return actual !== expected;
-                    });
+                    const counted = items.filter(item => verifyCookCounts[item.name] !== undefined);
+                    if (counted.length === 0) {
+                      return (
+                        <div style={{ padding: 14, background: colors.accentLight, borderRadius: 10, textAlign: "center", marginTop: 8, color: colors.accent, fontWeight: 600, fontSize: 14 }}>
+                          Aucun comptage soumis par les cuisiniers pour ce jour
+                        </div>
+                      );
+                    }
+                    const discrepancies = counted.filter(item => verifyCookCounts[item.name] !== getRemaining(item, phase));
                     if (discrepancies.length === 0) {
                       return (
-                        <div
-                          style={{
-                            padding: 14,
-                            background: colors.greenBg,
-                            borderRadius: 10,
-                            textAlign: "center",
-                            marginTop: 8,
-                            color: colors.green,
-                            fontWeight: 600,
-                            fontSize: 14,
-                          }}
-                        >
+                        <div style={{ padding: 14, background: colors.greenBg, borderRadius: 10, textAlign: "center", marginTop: 8, color: colors.green, fontWeight: 600, fontSize: 14 }}>
                           ✓ Tout correspond — aucun écart détecté
                         </div>
                       );
                     }
-                    const totalMissing = discrepancies.reduce((sum, item) => {
-                      const expected = getRemaining(item, phase);
-                      const actual = actualStock[item.name] ?? expected;
-                      return sum + (expected - actual);
+                    const totalDiff = discrepancies.reduce((sum, item) => {
+                      return sum + Math.abs(verifyCookCounts[item.name] - getRemaining(item, phase));
                     }, 0);
                     return (
-                      <div
-                        style={{
-                          padding: 14,
-                          background: colors.redBg,
-                          borderRadius: 10,
-                          textAlign: "center",
-                          marginTop: 8,
-                          color: colors.red,
-                          fontWeight: 600,
-                          fontSize: 14,
-                        }}
-                      >
-                        ⚠ {discrepancies.length} article(s) avec écart — {totalMissing} portion(s)
-                        manquante(s)
+                      <div style={{ padding: 14, background: colors.redBg, borderRadius: 10, textAlign: "center", marginTop: 8, color: colors.red, fontWeight: 600, fontSize: 14 }}>
+                        ⚠ {discrepancies.length} article(s) avec écart — {totalDiff} unité(s) de différence
                       </div>
                     );
                   })()}
                 </div>
               )}
+
+              {/* Cook counts */}
+              <button
+                style={{
+                  ...s.verifyBtn,
+                  background: showCookCounts ? colors.text : colors.blueBg,
+                  color: showCookCounts ? "#fff" : colors.blue,
+                }}
+                onClick={toggleCookCounts}
+              >
+                {showCookCounts ? "Masquer les comptages" : "Comptages des cuisiniers"}
+              </button>
+
+              {showCookCounts && (
+                <div style={{ padding: "0 16px 16px" }}>
+                  {cookCounts.length === 0 ? (
+                    <p style={{ textAlign: "center", color: colors.textMuted, padding: 16, fontSize: 13 }}>
+                      Aucun comptage pour ce jour.
+                    </p>
+                  ) : (() => {
+                    const groups = [];
+                    const seen = new Map();
+                    cookCounts.forEach((row) => {
+                      const key = `${row.cook_id}_${row.submitted_at}`;
+                      if (!seen.has(key)) {
+                        const g = {
+                          key,
+                          full_name: row.profiles?.full_name || "Inconnu",
+                          submitted_at: row.submitted_at,
+                          items: [],
+                        };
+                        seen.set(key, g);
+                        groups.push(g);
+                      }
+                      seen.get(key).items.push(row);
+                    });
+                    return groups.map((g) => (
+                      <div key={g.key} style={s.cookCountGroup}>
+                        <div style={{
+                          display: "flex", justifyContent: "space-between",
+                          alignItems: "baseline", marginBottom: 8,
+                        }}>
+                          <span style={{ fontWeight: 600, fontSize: 14 }}>{g.full_name}</span>
+                          <span style={{ fontSize: 12, color: colors.textMuted }}>
+                            {new Date(new Date(g.submitted_at).getTime() + 60 * 60 * 1000)
+                              .toISOString().slice(11, 16)}
+                          </span>
+                        </div>
+                        {g.items.map((row) => (
+                          <div
+                            key={row.id}
+                            style={{
+                              display: "flex", justifyContent: "space-between",
+                              fontSize: 13, paddingTop: 4, color: colors.text,
+                            }}
+                          >
+                            <span>{row.item_name}</span>
+                            <span style={{ fontWeight: 600 }}>
+                              {row.count} {row.unit === "kg" ? "KG" : row.unit === "l" ? "L" : "port."}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    ));
+                  })()}
+                </div>
+              )}
             </>
           )}
+
         </>
       )}
     </div>
