@@ -214,6 +214,23 @@ In midday and closing phases, two pill buttons sit between the summary bar and t
 ### Search + Add row
 A single flex row: a search input (flex: 1, with 🔍 icon and ×-clear button) and a 44×44 amber square "+" button. Clicking "+" expands an add-item form below the row as an accordion (name input, unit picker, cook assignment dropdown, Ajouter button). Clicking "×" collapses and resets the form.
 
+### Print / PDF report
+
+A 🖨️ button sits in the summary bar (disabled when no items). Clicking it opens a new browser window with a print-ready HTML page and triggers `window.print()` — the browser's "Save as PDF" handles the download.
+
+Layout of the printed sheet:
+- **Header**: "BOWLY" in large amber letters, date (long French format) and current time (UTC+1) below
+- **Table** with a full grid (amber header row, `border-collapse: collapse`, 1px tan borders on all cells):
+  1. Article — item name (pre-filled)
+  2. Stock ouverture — opening quantity + unit (pre-filled)
+  3. Reste cuisine matin — empty, filled by staff
+  4. Reste cuisine soir — empty, filled by staff
+  5. Observations — empty
+  6. Signature — empty
+- Alternating row shading (`#faf8f5`) for readability
+
+The function is `printReport()`, defined just after the summary stats block. It builds the HTML string inline and writes it to a new window — no external PDF library required.
+
 ## Constraints / things to preserve
 
 - **No TypeScript** — keep everything as plain `.jsx` / `.js`

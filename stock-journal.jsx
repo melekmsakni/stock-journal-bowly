@@ -946,19 +946,18 @@ export default function StockJournal({ profile = null }) {
   .header { text-align: center; margin-bottom: 28px; }
   .logo { font-size: 32px; font-weight: 900; letter-spacing: 6px; color: #C4841D; text-transform: uppercase; }
   .meta { font-size: 13px; color: #555; margin-top: 6px; letter-spacing: 0.04em; }
-  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; border: 2px solid #C4841D; }
   thead th {
     background: #C4841D; color: #fff; text-align: center;
     padding: 10px 8px; font-weight: 700; font-size: 11px;
     text-transform: uppercase; letter-spacing: 0.06em;
+    border: 1px solid #a36a10;
   }
-  thead th:first-child { text-align: left; border-radius: 4px 0 0 0; }
-  thead th:last-child { border-radius: 0 4px 0 0; }
+  thead th:first-child { text-align: left; }
   tbody tr:nth-child(even) { background: #faf8f5; }
-  tbody tr:hover { background: #fdf3e1; }
-  tbody td { padding: 10px 8px; border-bottom: 1px solid #e8e0d6; text-align: center; }
+  tbody td { padding: 10px 8px; text-align: center; border: 1px solid #d4c4a8; }
   tbody td:first-child { text-align: left; font-weight: 600; }
-  td.empty { background: repeating-linear-gradient(45deg, #f5f5f5, #f5f5f5 3px, #fff 3px, #fff 9px); }
+  td.empty { background: #fff; min-height: 36px; }
   .unit { font-size: 10px; color: #888; font-weight: 400; }
   .footer { margin-top: 20px; font-size: 11px; color: #aaa; text-align: right; }
   @media print { body { padding: 16px 20px; } }
