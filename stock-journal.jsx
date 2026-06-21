@@ -916,6 +916,85 @@ export default function StockJournal({ profile = null }) {
   const totalMorningSold = items.reduce((s, i) => s + i.morningUsed, 0);
   const totalAfternoonSold = items.reduce((s, i) => s + i.afternoonUsed, 0);
 
+  function printReport() {
+    const now = new Date(Date.now() + 60 * 60 * 1000);
+    const dateStr = formatDateLong(date);
+    const timeStr = now.toISOString().slice(11, 16);
+    const unitLabel = { portions: "Portions", kg: "KG", l: "L" };
+
+    const rows = items.map(item => {
+      const u = unitLabel[item.unit] || "Portions";
+      return `
+        <tr>
+          <td>${item.name}</td>
+          <td>${item.opening} <span class="unit">${u}</span></td>
+          <td class="empty"></td>
+          <td class="empty"></td>
+          <td class="empty"></td>
+          <td class="empty"></td>
+        </tr>`;
+    }).join("");
+
+    const html = `<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8"/>
+<title>Fiche de stock — BOWLY — ${dateStr}</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Helvetica Neue', Arial, sans-serif; color: #1a1a1a; background: #fff; padding: 32px 40px; }
+  .header { text-align: center; margin-bottom: 28px; }
+  .logo { font-size: 32px; font-weight: 900; letter-spacing: 6px; color: #C4841D; text-transform: uppercase; }
+  .meta { font-size: 13px; color: #555; margin-top: 6px; letter-spacing: 0.04em; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  thead th {
+    background: #C4841D; color: #fff; text-align: center;
+    padding: 10px 8px; font-weight: 700; font-size: 11px;
+    text-transform: uppercase; letter-spacing: 0.06em;
+  }
+  thead th:first-child { text-align: left; border-radius: 4px 0 0 0; }
+  thead th:last-child { border-radius: 0 4px 0 0; }
+  tbody tr:nth-child(even) { background: #faf8f5; }
+  tbody tr:hover { background: #fdf3e1; }
+  tbody td { padding: 10px 8px; border-bottom: 1px solid #e8e0d6; text-align: center; }
+  tbody td:first-child { text-align: left; font-weight: 600; }
+  td.empty { background: repeating-linear-gradient(45deg, #f5f5f5, #f5f5f5 3px, #fff 3px, #fff 9px); }
+  .unit { font-size: 10px; color: #888; font-weight: 400; }
+  .footer { margin-top: 20px; font-size: 11px; color: #aaa; text-align: right; }
+  @media print { body { padding: 16px 20px; } }
+</style>
+</head>
+<body>
+<div class="header">
+  <div class="logo">BOWLY</div>
+  <div class="meta">${dateStr} &nbsp;·&nbsp; ${timeStr}</div>
+</div>
+<table>
+  <thead>
+    <tr>
+      <th style="width:28%">Article</th>
+      <th style="width:14%">Stock ouverture</th>
+      <th style="width:14%">Reste cuisine matin</th>
+      <th style="width:14%">Reste cuisine soir</th>
+      <th style="width:15%">Observations</th>
+      <th style="width:15%">Signature</th>
+    </tr>
+  </thead>
+  <tbody>
+    ${rows}
+  </tbody>
+</table>
+<div class="footer">Imprimé le ${dateStr} à ${timeStr} — BOWLY</div>
+</body>
+</html>`;
+
+    const win = window.open("", "_blank");
+    win.document.write(html);
+    win.document.close();
+    win.focus();
+    win.print();
+  }
+
   const filteredItems = searchQuery
     ? items.map((item, i) => ({ item, i })).filter(({ item }) =>
         item.name.toLowerCase().includes(searchQuery.toLowerCase())
@@ -1357,27 +1436,47 @@ export default function StockJournal({ profile = null }) {
             </div>
           </div>
 
-          {/* Summary metric tiles */}
+          {/* Summary metric tiles + print */}
           <div style={s.summaryBar}>
-            <div style={s.summaryText}>
-              {[
-                { label: "Articles", value: totalItems, color: colors.textMuted, bg: colors.card, border: colors.border },
-                ...(phase !== "opening" ? [{ label: "Vdu matin", value: totalMorningSold, color: colors.blue, bg: colors.blueBg, border: colors.blue + "44" }] : []),
-                ...(phase === "closing" ? [{ label: "Vdu soir", value: totalAfternoonSold, color: "#7B1FA2", bg: "#F3E5F5", border: "#CE93D844" }] : []),
-              ].map(({ label, value, color, bg, border }) => (
-                <div key={label} style={{
-                  flex: "1 0 auto",
-                  background: bg,
-                  border: "1.5px solid " + border,
-                  borderRadius: 14,
-                  padding: "10px 12px 8px",
-                  textAlign: "center",
-                  minWidth: 72,
-                }}>
-                  <div style={{ fontSize: 24, fontWeight: 800, color, lineHeight: 1, letterSpacing: "-0.5px" }}>{value}</div>
-                  <div style={{ fontSize: 10, color, fontWeight: 700, marginTop: 4, textTransform: "uppercase", letterSpacing: "0.06em", opacity: 0.75 }}>{label}</div>
-                </div>
-              ))}
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div style={{ ...s.summaryText, flex: 1 }}>
+                {[
+                  { label: "Articles", value: totalItems, color: colors.textMuted, bg: colors.card, border: colors.border },
+                  ...(phase !== "opening" ? [{ label: "Vdu matin", value: totalMorningSold, color: colors.blue, bg: colors.blueBg, border: colors.blue + "44" }] : []),
+                  ...(phase === "closing" ? [{ label: "Vdu soir", value: totalAfternoonSold, color: "#7B1FA2", bg: "#F3E5F5", border: "#CE93D844" }] : []),
+                ].map(({ label, value, color, bg, border }) => (
+                  <div key={label} style={{
+                    flex: "1 0 auto",
+                    background: bg,
+                    border: "1.5px solid " + border,
+                    borderRadius: 14,
+                    padding: "10px 12px 8px",
+                    textAlign: "center",
+                    minWidth: 72,
+                  }}>
+                    <div style={{ fontSize: 24, fontWeight: 800, color, lineHeight: 1, letterSpacing: "-0.5px" }}>{value}</div>
+                    <div style={{ fontSize: 10, color, fontWeight: 700, marginTop: 4, textTransform: "uppercase", letterSpacing: "0.06em", opacity: 0.75 }}>{label}</div>
+                  </div>
+                ))}
+              </div>
+              <button
+                onClick={printReport}
+                disabled={items.length === 0}
+                title="Télécharger la fiche PDF"
+                style={{
+                  flexShrink: 0,
+                  width: 44, height: 44,
+                  borderRadius: 12,
+                  border: "1.5px solid " + (items.length === 0 ? colors.border : "#2D7D46" + "88"),
+                  background: items.length === 0 ? colors.card : "#EDF7F1",
+                  color: items.length === 0 ? colors.textMuted : "#2D7D46",
+                  fontSize: 20,
+                  cursor: items.length === 0 ? "default" : "pointer",
+                  opacity: items.length === 0 ? 0.4 : 1,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  transition: "all 0.15s",
+                }}
+              >🖨️</button>
             </div>
           </div>
 
