@@ -16,7 +16,7 @@ A French-language daily stock journal for a food retail business. Staff (father 
 
 | File | Purpose |
 |------|---------|
-| `stock-journal.jsx` | Admin stock journal (~1300 lines, single component) |
+| `stock-journal.jsx` | Admin stock journal (~1900 lines, single component) |
 | `src/App.jsx` | Auth router — checks session, fetches profile, routes to Login / StockJournal / CookApp |
 | `src/login.jsx` | Login page (email + password, French UI, no self-signup) |
 | `src/cook-app.jsx` | Cook counting UI — enter quantities per item, submit to `cook_counts` |
@@ -192,6 +192,27 @@ Both the **Vérifier le stock réel** panel and the **Comptages des cuisiniers**
 In the closing (après-midi) and midday phases the panels render in this order:
 1. **Vérifier le stock réel** — comparison table (expected rest vs. cook count vs. écart)
 2. **Comptages des cuisiniers** — individual submission cards per cook
+
+## UI design
+
+### Header
+Dark gradient background (`#1A1310 → #2C2520 → #372D25`), sticky at top. Shows the app title, the formatted date as a subtitle, a date picker row (with an "Aujourd'hui" badge when on today's date), and a tab bar (Aujourd'hui / Historique / Personnel). Tabs animate with background and color transitions (`0.22s ease`). The date input has `max={getTodayStr()}` so future dates cannot be selected.
+
+### Phase bar (stepper)
+Three animated step dots sit above the phase name. The active dot expands from 6 px to 32 px wide via a `width 0.3s cubic-bezier(0.4,0,0.2,1)` transition. Done dots are faded amber, the active dot is full amber, future dots are grey. Below the dots: the phase label in bold, and "Étape X / 3" in small uppercase muted text. Navigation arrows (← →) are 38×38 rounded square buttons, amber-tinted when enabled, faded when at the edge.
+
+### Summary bar
+A scrollable row of metric tiles immediately below the phase bar. Each tile has a large bold number (fontSize 24, fontWeight 800) with a small uppercase label below. Tiles shown per phase:
+- **All phases**: Articles (grey/neutral)
+- **Midday + Closing**: Vdu matin (blue)
+- **Closing only**: Vdu soir (purple)
+The opening total is intentionally omitted — it was removed as not useful for daily operations. Tiles use `flex: "1 0 auto"` so they scroll horizontally on narrow screens.
+
+### Vérification + Comptages accordion
+In midday and closing phases, two pill buttons sit between the summary bar and the search row. Clicking "📊 Vérification" or "👨‍🍳 Comptages" expands the respective panel inline below the pills. The Vérification pill shows a live badge: green "✓ OK" or red "N écart(s)". The Comptages pill shows the submission count. This placement puts the most action-relevant panels at the top without requiring any scrolling.
+
+### Search + Add row
+A single flex row: a search input (flex: 1, with 🔍 icon and ×-clear button) and a 44×44 amber square "+" button. Clicking "+" expands an add-item form below the row as an accordion (name input, unit picker, cook assignment dropdown, Ajouter button). Clicking "×" collapses and resets the form.
 
 ## Constraints / things to preserve
 

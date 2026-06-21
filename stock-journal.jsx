@@ -196,6 +196,8 @@ export default function StockJournal({ profile = null }) {
   const [actualStock, setActualStock] = useState({});
   const [showVerify, setShowVerify] = useState(false);
   const [verifyCookCounts, setVerifyCookCounts] = useState({});
+  const [searchQuery, setSearchQuery] = useState("");
+  const [showSuggestions, setShowSuggestions] = useState(false);
 
   // Tracks the latest load so stale async results (from Realtime or fast navigation) are discarded
   const loadIdRef = useRef(0);
@@ -623,83 +625,94 @@ export default function StockJournal({ profile = null }) {
       padding: "0 0 100px",
     },
     header: {
-      background: "#2C2520",
+      background: "linear-gradient(160deg, #1A1310 0%, #2C2520 55%, #372D25 100%)",
       color: "#fff",
-      padding: "20px 16px 16px",
+      padding: "18px 16px 0",
       position: "sticky",
       top: 0,
       zIndex: 10,
+      boxShadow: "0 4px 24px rgba(0,0,0,0.28)",
     },
     title: {
-      fontSize: 20,
-      fontWeight: 700,
+      fontSize: 21,
+      fontWeight: 800,
       margin: 0,
-      letterSpacing: "-0.3px",
+      letterSpacing: "-0.5px",
+      display: "flex",
+      alignItems: "center",
+      gap: 8,
     },
     dateRow: {
       display: "flex",
       alignItems: "center",
       gap: 8,
-      marginTop: 8,
+      marginTop: 12,
+      marginBottom: 14,
     },
     dateInput: {
-      background: "rgba(255,255,255,0.12)",
-      border: "none",
+      background: "rgba(255,255,255,0.1)",
+      border: "1px solid rgba(255,255,255,0.18)",
       color: "#fff",
-      padding: "6px 10px",
-      borderRadius: 6,
-      fontSize: 14,
+      padding: "7px 12px",
+      borderRadius: 10,
+      fontSize: 13,
       fontFamily: "inherit",
+      transition: "background 0.2s, border-color 0.2s",
+      cursor: "pointer",
     },
     tabs: {
       display: "flex",
-      gap: 0,
-      marginTop: 12,
+      gap: 4,
+      padding: "5px",
+      background: "rgba(0,0,0,0.3)",
+      borderRadius: "12px 12px 0 0",
     },
     tab: (active) => ({
       flex: 1,
-      padding: "8px 0",
+      padding: "9px 0",
       textAlign: "center",
       fontSize: 13,
-      fontWeight: active ? 600 : 400,
+      fontWeight: active ? 700 : 500,
       color: active ? "#fff" : "rgba(255,255,255,0.5)",
-      borderBottom: active ? "2px solid " + colors.accent : "2px solid transparent",
       cursor: "pointer",
-      background: "none",
+      background: active ? colors.accent : "none",
       border: "none",
-      borderBottomWidth: 2,
-      borderBottomStyle: "solid",
-      borderBottomColor: active ? colors.accent : "transparent",
+      borderRadius: 8,
       fontFamily: "inherit",
+      transition: "background 0.22s ease, color 0.22s ease, font-weight 0.1s ease",
+      boxShadow: active ? "0 2px 8px rgba(196,132,29,0.45)" : "none",
+      letterSpacing: active ? "-0.2px" : "0",
     }),
     phaseBar: {
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "space-between",
-      padding: "12px 16px",
-      background: colors.accentLight,
+      background: colors.card,
       borderBottom: "1px solid " + colors.border,
+      padding: "14px 16px 12px",
     },
     phaseLabel: {
-      fontSize: 14,
-      fontWeight: 600,
-      color: colors.accent,
+      fontSize: 16,
+      fontWeight: 700,
+      color: colors.text,
+      textAlign: "center",
+      margin: "4px 0 2px",
     },
     phaseNav: {
       display: "flex",
-      gap: 6,
+      alignItems: "center",
+      justifyContent: "space-between",
     },
     phaseBtn: (disabled) => ({
-      padding: "5px 12px",
-      fontSize: 13,
-      border: "1px solid " + (disabled ? colors.border : colors.accent),
-      background: disabled ? colors.bg : colors.accent,
-      color: disabled ? colors.textMuted : "#fff",
-      borderRadius: 6,
+      width: 38, height: 38,
+      display: "flex", alignItems: "center", justifyContent: "center",
+      fontSize: 18,
+      border: "1.5px solid " + (disabled ? colors.border : colors.accent + "88"),
+      background: disabled ? "transparent" : colors.accentLight,
+      color: disabled ? colors.border : colors.accent,
+      borderRadius: 10,
       cursor: disabled ? "default" : "pointer",
       fontFamily: "inherit",
-      fontWeight: 500,
-      opacity: disabled ? 0.5 : 1,
+      fontWeight: 700,
+      opacity: disabled ? 0.35 : 1,
+      transition: "all 0.18s ease",
     }),
     section: {
       padding: "8px 16px",
@@ -823,17 +836,14 @@ export default function StockJournal({ profile = null }) {
       color: diff === 0 ? colors.green : colors.red,
     }),
     summaryBar: {
-      padding: "12px 16px",
-      background: colors.card,
-      borderTop: "1px solid " + colors.border,
-      borderBottom: "1px solid " + colors.border,
-      marginBottom: 8,
+      padding: "12px 16px 4px",
+      background: colors.bg,
     },
     summaryText: {
-      fontSize: 13,
-      color: colors.textMuted,
       display: "flex",
-      justifyContent: "space-between",
+      gap: 8,
+      overflowX: "auto",
+      paddingBottom: 8,
     },
     historyItem: {
       padding: "14px 16px",
@@ -854,14 +864,16 @@ export default function StockJournal({ profile = null }) {
       lineHeight: 1,
     },
     logoutBtn: {
-      background: "rgba(255,255,255,0.12)",
-      border: "none",
-      color: "#fff",
+      background: "rgba(255,255,255,0.08)",
+      border: "1px solid rgba(255,255,255,0.15)",
+      color: "rgba(255,255,255,0.7)",
       padding: "6px 12px",
-      borderRadius: 6,
-      fontSize: 13,
+      borderRadius: 8,
+      fontSize: 12,
       cursor: "pointer",
       fontFamily: "inherit",
+      transition: "background 0.2s, color 0.2s",
+      letterSpacing: "0.02em",
     },
     userCard: {
       padding: "14px 16px",
@@ -904,24 +916,48 @@ export default function StockJournal({ profile = null }) {
   const totalMorningSold = items.reduce((s, i) => s + i.morningUsed, 0);
   const totalAfternoonSold = items.reduce((s, i) => s + i.afternoonUsed, 0);
 
+  const filteredItems = searchQuery
+    ? items.map((item, i) => ({ item, i })).filter(({ item }) =>
+        item.name.toLowerCase().includes(searchQuery.toLowerCase())
+      )
+    : items.map((item, i) => ({ item, i }));
+
   return (
     <div style={s.app}>
       {/* Header */}
       <div style={s.header}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <h1 style={s.title}>Journal de Stock</h1>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+          <div>
+            <h1 style={s.title}>
+              <span style={{ fontSize: 20 }}>📦</span>
+              Journal de Stock
+            </h1>
+            <p style={{ margin: "4px 0 0", fontSize: 12, color: "rgba(255,255,255,0.45)", fontWeight: 400, letterSpacing: "0.01em" }}>
+              {formatDateLong(date)}
+            </p>
+          </div>
           <button style={s.logoutBtn} onClick={() => supabase.auth.signOut()}>
-            Se déconnecter
+            Déconnexion
           </button>
         </div>
         <div style={s.dateRow}>
+          <span style={{ fontSize: 14, opacity: 0.6 }}>📅</span>
           <input
             type="date"
             value={date}
+            max={getTodayStr()}
             onChange={(e) => setDate(e.target.value)}
             style={s.dateInput}
           />
-          <span style={{ fontSize: 13, opacity: 0.6 }}>{formatDate(date)}</span>
+          {date === getTodayStr() && (
+            <span style={{
+              fontSize: 11, fontWeight: 700, color: colors.accent,
+              background: "rgba(196,132,29,0.18)", borderRadius: 6,
+              padding: "3px 8px", letterSpacing: "0.04em", textTransform: "uppercase",
+            }}>
+              Aujourd'hui
+            </span>
+          )}
         </div>
         <div style={s.tabs}>
           <button style={s.tab(view === "today")} onClick={() => setView("today")}>
@@ -1285,42 +1321,493 @@ export default function StockJournal({ profile = null }) {
         </div>
       ) : (
         <>
-          {/* Phase bar */}
+          {/* Phase bar — stepper */}
           <div style={s.phaseBar}>
-            <span style={s.phaseLabel}>
-              {PHASES.indexOf(phase) + 1}/3 — {PHASE_LABELS[phase]}
-            </span>
             <div style={s.phaseNav}>
-              <button
-                style={s.phaseBtn(phase === "opening")}
-                onClick={goBackPhase}
-                disabled={phase === "opening"}
-              >
-                ←
-              </button>
-              <button
-                style={s.phaseBtn(phase === "closing")}
-                onClick={advancePhase}
-                disabled={phase === "closing"}
-              >
-                →
-              </button>
+              <button style={s.phaseBtn(phase === "opening")} onClick={goBackPhase} disabled={phase === "opening"}>←</button>
+
+              <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+                {/* Step dots */}
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  {PHASES.map((p, idx) => {
+                    const currentIdx = PHASES.indexOf(phase);
+                    const done = idx < currentIdx;
+                    const active = idx === currentIdx;
+                    return (
+                      <div key={p} style={{
+                        height: 6,
+                        width: active ? 32 : 6,
+                        borderRadius: 3,
+                        background: done ? colors.accent + "55" : active ? colors.accent : colors.border,
+                        transition: "width 0.3s cubic-bezier(0.4,0,0.2,1), background 0.3s ease",
+                      }} />
+                    );
+                  })}
+                </div>
+                {/* Phase name */}
+                <div>
+                  <div style={s.phaseLabel}>{PHASE_LABELS[phase]}</div>
+                  <div style={{ fontSize: 11, color: colors.textMuted, textAlign: "center", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 600 }}>
+                    Étape {PHASES.indexOf(phase) + 1} / 3
+                  </div>
+                </div>
+              </div>
+
+              <button style={s.phaseBtn(phase === "closing")} onClick={advancePhase} disabled={phase === "closing"}>→</button>
             </div>
           </div>
 
-          {/* Summary */}
+          {/* Summary metric tiles */}
           <div style={s.summaryBar}>
             <div style={s.summaryText}>
-              <span>{totalItems} articles</span>
-              <span>Stock total: {totalOpening}</span>
-              {phase !== "opening" && <span>Vendu matin: {totalMorningSold}</span>}
-              {phase === "closing" && <span>Vendu après-midi: {totalAfternoonSold}</span>}
+              {[
+                { label: "Articles", value: totalItems, color: colors.textMuted, bg: colors.card, border: colors.border },
+                ...(phase !== "opening" ? [{ label: "Vdu matin", value: totalMorningSold, color: colors.blue, bg: colors.blueBg, border: colors.blue + "44" }] : []),
+                ...(phase === "closing" ? [{ label: "Vdu soir", value: totalAfternoonSold, color: "#7B1FA2", bg: "#F3E5F5", border: "#CE93D844" }] : []),
+              ].map(({ label, value, color, bg, border }) => (
+                <div key={label} style={{
+                  flex: "1 0 auto",
+                  background: bg,
+                  border: "1.5px solid " + border,
+                  borderRadius: 14,
+                  padding: "10px 12px 8px",
+                  textAlign: "center",
+                  minWidth: 72,
+                }}>
+                  <div style={{ fontSize: 24, fontWeight: 800, color, lineHeight: 1, letterSpacing: "-0.5px" }}>{value}</div>
+                  <div style={{ fontSize: 10, color, fontWeight: 700, marginTop: 4, textTransform: "uppercase", letterSpacing: "0.06em", opacity: 0.75 }}>{label}</div>
+                </div>
+              ))}
             </div>
+          </div>
+
+          {/* Verify + Cook counts — top accordion pills for midday/closing */}
+          {phase !== "opening" && (
+            <div style={{ padding: "8px 16px 4px" }}>
+              {/* Pill button row */}
+              <div style={{ display: "flex", gap: 8, marginBottom: (showVerify || showCookCounts) ? 10 : 0 }}>
+                <button
+                  onClick={toggleVerify}
+                  style={{
+                    flex: 1, padding: "10px 12px", borderRadius: 12,
+                    border: "1.5px solid " + (showVerify ? colors.accent : colors.border),
+                    background: showVerify ? colors.accentLight : colors.card,
+                    color: showVerify ? colors.accent : colors.text,
+                    fontWeight: 600, fontSize: 13, cursor: "pointer", fontFamily: "inherit",
+                    display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                    transition: "all 0.15s",
+                    boxShadow: showVerify ? "0 2px 8px " + colors.accent + "22" : "0 1px 3px rgba(0,0,0,0.06)",
+                  }}
+                >
+                  <span style={{ fontSize: 15 }}>📊</span>
+                  <span>Vérification</span>
+                  {(() => {
+                    const counted = items.filter(item => verifyCookCounts[item.name] !== undefined);
+                    if (counted.length === 0) return null;
+                    const discrepancies = counted.filter(item => verifyCookCounts[item.name] !== getRemaining(item, phase));
+                    return (
+                      <span style={{
+                        background: discrepancies.length > 0 ? colors.red : colors.green,
+                        color: "#fff", borderRadius: 99, fontSize: 11, fontWeight: 700,
+                        padding: "1px 7px", lineHeight: "18px",
+                      }}>
+                        {discrepancies.length > 0 ? `${discrepancies.length} écart${discrepancies.length > 1 ? "s" : ""}` : "✓ OK"}
+                      </span>
+                    );
+                  })()}
+                </button>
+
+                <button
+                  onClick={toggleCookCounts}
+                  style={{
+                    flex: 1, padding: "10px 12px", borderRadius: 12,
+                    border: "1.5px solid " + (showCookCounts ? colors.blue : colors.border),
+                    background: showCookCounts ? colors.blueBg : colors.card,
+                    color: showCookCounts ? colors.blue : colors.text,
+                    fontWeight: 600, fontSize: 13, cursor: "pointer", fontFamily: "inherit",
+                    display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                    transition: "all 0.15s",
+                    boxShadow: showCookCounts ? "0 2px 8px " + colors.blue + "22" : "0 1px 3px rgba(0,0,0,0.06)",
+                  }}
+                >
+                  <span style={{ fontSize: 15 }}>👨‍🍳</span>
+                  <span>Comptages</span>
+                  {cookCounts.length > 0 && (
+                    <span style={{
+                      background: colors.blue, color: "#fff",
+                      borderRadius: 99, fontSize: 11, fontWeight: 700,
+                      padding: "1px 7px", lineHeight: "18px",
+                    }}>
+                      {cookCounts.length}
+                    </span>
+                  )}
+                </button>
+              </div>
+
+              {/* Verify panel */}
+              {showVerify && (
+                <div style={{
+                  background: colors.card, borderRadius: 14,
+                  border: "1.5px solid " + colors.accent + "33",
+                  marginBottom: 8, overflow: "hidden",
+                }}>
+                  <div style={{ padding: "12px 14px 8px" }}>
+                    <p style={{ fontSize: 12, color: colors.textMuted, margin: "0 0 10px" }}>
+                      Comptage des cuisiniers du {phase === "midday" ? "matin" : "soir"} vs stock attendu.
+                    </p>
+                    <div style={{ display: "flex", justifyContent: "space-between", padding: "0 2px 6px", fontSize: 11, fontWeight: 600, color: colors.textMuted, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                      <span>Article</span>
+                      <div style={{ display: "flex", gap: 16, textAlign: "right" }}>
+                        <span style={{ width: 56 }}>Reste prévu</span>
+                        <span style={{ width: 56 }}>En cuisine</span>
+                        <span style={{ width: 40 }}>Écart</span>
+                      </div>
+                    </div>
+                    {items.map((item, i) => {
+                      const expected = getRemaining(item, phase);
+                      const hasCookCount = verifyCookCounts[item.name] !== undefined;
+                      const cookCount = hasCookCount ? verifyCookCounts[item.name] : null;
+                      const diff = hasCookCount ? cookCount - expected : null;
+                      const matches = diff === 0;
+                      return (
+                        <div key={i} style={{
+                          ...s.verifyCard(hasCookCount ? diff : 0),
+                          background: !hasCookCount ? colors.bgPage : matches ? colors.greenBg : colors.redBg,
+                          border: "1px solid " + (!hasCookCount ? colors.border : matches ? colors.green + "33" : colors.red + "33"),
+                          marginBottom: 6,
+                        }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                            <div style={{ fontWeight: 600, fontSize: 14 }}>{item.name}</div>
+                            <div style={{ display: "flex", gap: 16, alignItems: "center", textAlign: "right" }}>
+                              <span style={{ width: 56, fontSize: 15, fontWeight: 700, color: colors.text }}>{expected}</span>
+                              <span style={{ width: 56, fontSize: 15, fontWeight: 700, color: hasCookCount ? colors.text : colors.textMuted }}>
+                                {hasCookCount ? cookCount : "—"}
+                              </span>
+                              <span style={{ width: 40, ...s.diffBadge(diff ?? 0), color: !hasCookCount ? colors.textMuted : matches ? colors.green : colors.red }}>
+                                {!hasCookCount ? "—" : matches ? "✓" : diff > 0 ? `+${diff}` : diff}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {(() => {
+                      const counted = items.filter(item => verifyCookCounts[item.name] !== undefined);
+                      if (counted.length === 0) {
+                        return (
+                          <div style={{ padding: "10px 14px", background: colors.accentLight, borderRadius: 10, textAlign: "center", marginTop: 4, color: colors.accent, fontWeight: 600, fontSize: 13 }}>
+                            Aucun comptage soumis par les cuisiniers pour ce jour
+                          </div>
+                        );
+                      }
+                      const discrepancies = counted.filter(item => verifyCookCounts[item.name] !== getRemaining(item, phase));
+                      if (discrepancies.length === 0) {
+                        return (
+                          <div style={{ padding: "10px 14px", background: colors.greenBg, borderRadius: 10, textAlign: "center", marginTop: 4, color: colors.green, fontWeight: 600, fontSize: 13 }}>
+                            ✓ Tout correspond — aucun écart détecté
+                          </div>
+                        );
+                      }
+                      const totalDiff = discrepancies.reduce((sum, item) => {
+                        return sum + Math.abs(verifyCookCounts[item.name] - getRemaining(item, phase));
+                      }, 0);
+                      return (
+                        <div style={{ padding: "10px 14px", background: colors.redBg, borderRadius: 10, textAlign: "center", marginTop: 4, color: colors.red, fontWeight: 600, fontSize: 13 }}>
+                          ⚠ {discrepancies.length} article(s) avec écart — {totalDiff} unité(s) de différence
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </div>
+              )}
+
+              {/* Cook counts panel */}
+              {showCookCounts && (
+                <div style={{
+                  background: colors.card, borderRadius: 14,
+                  border: "1.5px solid " + colors.blue + "33",
+                  marginBottom: 8, overflow: "hidden",
+                }}>
+                  <div style={{ padding: "12px 14px 8px" }}>
+                    {cookCounts.length === 0 ? (
+                      <p style={{ textAlign: "center", color: colors.textMuted, padding: "8px 0", fontSize: 13, margin: 0 }}>
+                        Aucun comptage pour ce jour.
+                      </p>
+                    ) : (() => {
+                      const groups = [];
+                      const seen = new Map();
+                      cookCounts.forEach((row) => {
+                        const key = `${row.cook_id}_${row.submitted_at}`;
+                        if (!seen.has(key)) {
+                          const g = {
+                            key,
+                            full_name: row.profiles?.full_name || "Inconnu",
+                            submitted_at: row.submitted_at,
+                            items: [],
+                          };
+                          seen.set(key, g);
+                          groups.push(g);
+                        }
+                        seen.get(key).items.push(row);
+                      });
+                      return groups.map((g) => (
+                        <div key={g.key} style={{ ...s.cookCountGroup, marginBottom: 8 }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
+                            <span style={{ fontWeight: 600, fontSize: 14 }}>{g.full_name}</span>
+                            <span style={{ fontSize: 12, color: colors.textMuted }}>
+                              {new Date(new Date(g.submitted_at).getTime() + 60 * 60 * 1000)
+                                .toISOString().slice(11, 16)}
+                            </span>
+                          </div>
+                          {g.items.map((row) => (
+                            <div key={row.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, paddingTop: 4, color: colors.text }}>
+                              <span>{row.item_name}</span>
+                              <span style={{ fontWeight: 600 }}>
+                                {row.count} {row.unit === "kg" ? "KG" : row.unit === "l" ? "L" : "port."}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      ));
+                    })()}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Search + Add — single unified row */}
+          <div style={{ padding: "10px 16px 6px", position: "relative" }}>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              {/* Search input */}
+              <div style={{ position: "relative", flex: 1 }}>
+                <span style={{
+                  position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)",
+                  color: colors.textMuted, fontSize: 15, pointerEvents: "none", userSelect: "none",
+                }}>🔍</span>
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => { setSearchQuery(e.target.value); setShowSuggestions(true); }}
+                  onFocus={() => setShowSuggestions(true)}
+                  onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
+                  placeholder="Rechercher un article..."
+                  style={{
+                    width: "100%",
+                    boxSizing: "border-box",
+                    padding: "11px 36px 11px 38px",
+                    border: "1.5px solid " + (searchQuery ? colors.accent : colors.border),
+                    borderRadius: 12,
+                    fontSize: 14,
+                    fontFamily: "inherit",
+                    background: "#fff",
+                    outline: "none",
+                    transition: "border-color 0.15s",
+                    boxShadow: "0 1px 4px rgba(0,0,0,0.05)",
+                  }}
+                />
+                {searchQuery && (
+                  <button
+                    onClick={() => { setSearchQuery(""); setShowSuggestions(false); }}
+                    style={{
+                      position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)",
+                      background: "none", border: "none", cursor: "pointer",
+                      fontSize: 18, color: colors.textMuted, padding: "0 4px", lineHeight: 1, fontFamily: "inherit",
+                    }}
+                  >×</button>
+                )}
+              </div>
+              {/* Add button — compact square pill */}
+              <button
+                onClick={() => {
+                  if (showAddItem) { setShowAddItem(false); setNewItemName(""); setNewItemUnit("portions"); setNewItemAssignedTo([]); setShowNewAssignDropdown(false); }
+                  else setShowAddItem(true);
+                }}
+                title={showAddItem ? "Fermer" : "Ajouter un article"}
+                style={{
+                  width: 44, height: 44, flexShrink: 0, borderRadius: 12,
+                  border: "1.5px solid " + (showAddItem ? colors.accent : colors.accent + "66"),
+                  background: showAddItem ? colors.accent : colors.accentLight,
+                  color: showAddItem ? "#fff" : colors.accent,
+                  fontSize: showAddItem ? 22 : 24, fontWeight: 700,
+                  cursor: "pointer", fontFamily: "inherit",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  transition: "all 0.15s",
+                  boxShadow: showAddItem ? "0 2px 10px " + colors.accent + "44" : "0 1px 3px rgba(0,0,0,0.06)",
+                  lineHeight: 1,
+                }}
+              >
+                {showAddItem ? "×" : "+"}
+              </button>
+            </div>
+
+            {/* Suggestions dropdown */}
+            {showSuggestions && searchQuery && (() => {
+              const q = searchQuery.toLowerCase();
+              const suggestions = items.filter(item =>
+                item.name.toLowerCase().includes(q) && item.name.toLowerCase() !== q
+              );
+              if (suggestions.length === 0) return null;
+              return (
+                <div style={{
+                  position: "absolute", left: 16, right: 16, zIndex: 30,
+                  background: "#fff",
+                  border: "1.5px solid " + colors.accent,
+                  borderTop: "none",
+                  borderRadius: "0 0 12px 12px",
+                  boxShadow: "0 6px 20px rgba(0,0,0,0.12)",
+                  overflow: "hidden",
+                }}>
+                  {suggestions.slice(0, 6).map((suggestion, idx) => (
+                    <div
+                      key={suggestion.name}
+                      onMouseDown={() => { setSearchQuery(suggestion.name); setShowSuggestions(false); }}
+                      style={{
+                        padding: "10px 14px", fontSize: 14, cursor: "pointer",
+                        display: "flex", alignItems: "center", gap: 10,
+                        borderTop: idx > 0 ? "1px solid " + colors.border : "none",
+                        color: colors.text, background: "#fff",
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.background = colors.accentLight; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
+                    >
+                      <span style={{ color: colors.accent, fontSize: 13 }}>↩</span>
+                      <span>{suggestion.name}</span>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
+
+            {/* Add item form — accordion below the row */}
+            {showAddItem && (
+              <div style={{
+                marginTop: 8,
+                background: colors.card,
+                border: "1.5px solid " + colors.accent + "55",
+                borderRadius: 12,
+                padding: 12,
+                display: "flex", flexDirection: "column", gap: 8,
+                boxShadow: "0 2px 12px rgba(196,132,29,0.08)",
+              }}>
+                <div style={s.addRow}>
+                  <input
+                    type="text"
+                    value={newItemName}
+                    onChange={(e) => setNewItemName(e.target.value)}
+                    placeholder="Nom de l'article..."
+                    style={s.addInput}
+                    onKeyDown={(e) => e.key === "Enter" && addItem()}
+                    autoFocus
+                  />
+                  <button style={s.confirmBtn} onClick={addItem}>
+                    Ajouter
+                  </button>
+                </div>
+                <div style={{ display: "flex", gap: 6 }}>
+                  {[
+                    { value: "portions", label: "Portions" },
+                    { value: "kg", label: "KG" },
+                    { value: "l", label: "L" },
+                  ].map(({ value, label }) => (
+                    <button
+                      key={value}
+                      onClick={() => setNewItemUnit(value)}
+                      style={{
+                        flex: 1,
+                        padding: "8px 0",
+                        border: "1px solid " + (newItemUnit === value ? colors.accent : colors.border),
+                        borderRadius: 8,
+                        background: newItemUnit === value ? colors.accentLight : "#fff",
+                        color: newItemUnit === value ? colors.accent : colors.textMuted,
+                        fontWeight: newItemUnit === value ? 700 : 400,
+                        fontSize: 14,
+                        cursor: "pointer",
+                        fontFamily: "inherit",
+                      }}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                {cooks.length > 0 && (
+                  <div style={{ position: 'relative' }}>
+                    <div style={{ fontSize: 11, color: colors.textMuted, fontWeight: 600, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Personnel assigné</div>
+                    <button
+                      type="button"
+                      onClick={() => setShowNewAssignDropdown(prev => !prev)}
+                      style={{
+                        width: '100%', padding: '8px 12px', background: '#fff',
+                        border: '1px solid ' + (showNewAssignDropdown ? colors.accent : colors.border),
+                        borderRadius: showNewAssignDropdown ? '8px 8px 0 0' : 8,
+                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                        cursor: 'pointer', fontFamily: 'inherit', fontSize: 13, color: colors.text,
+                      }}
+                    >
+                      <span style={{ color: newItemAssignedTo.length === 0 ? colors.textMuted : colors.text }}>
+                        {newItemAssignedTo.length === 0
+                          ? 'Aucun'
+                          : newItemAssignedTo.map(id => cooks.find(c => c.id === id)?.full_name).filter(Boolean).join(', ')}
+                      </span>
+                      <span style={{ fontSize: 11, color: colors.textMuted }}>{showNewAssignDropdown ? '▲' : '▼'}</span>
+                    </button>
+                    {showNewAssignDropdown && (
+                      <div style={{
+                        position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10,
+                        background: '#fff', border: '1px solid ' + colors.accent,
+                        borderTop: 'none', borderRadius: '0 0 8px 8px',
+                        boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                      }}>
+                        {cooks.map((c, ci) => {
+                          const selected = newItemAssignedTo.includes(c.id);
+                          return (
+                            <div
+                              key={c.id}
+                              onClick={() => setNewItemAssignedTo(prev => selected ? prev.filter(id => id !== c.id) : [...prev, c.id])}
+                              style={{
+                                padding: '9px 12px', cursor: 'pointer', fontSize: 13,
+                                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                                background: selected ? colors.accentLight : '#fff',
+                                borderTop: ci > 0 ? '1px solid ' + colors.border : 'none',
+                              }}
+                            >
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <span style={{
+                                  width: 18, height: 18, borderRadius: 4, border: '2px solid ' + (selected ? colors.accent : colors.border),
+                                  background: selected ? colors.accent : '#fff',
+                                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                  flexShrink: 0,
+                                }}>
+                                  {selected && <span style={{ color: '#fff', fontSize: 11, lineHeight: 1 }}>✓</span>}
+                                </span>
+                                <span style={{ fontWeight: selected ? 600 : 400 }}>{c.full_name}</span>
+                              </div>
+                              <span style={{ fontSize: 11, color: colors.accent, fontWeight: 600 }}>
+                                {c.shift === 'après-midi' ? 'AM' : c.shift === 'journée' ? 'Jour.' : 'Mat.'}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Items */}
           <div style={s.section}>
-            {items.map((item, i) => {
+            {filteredItems.length === 0 && searchQuery ? (
+              <div style={{
+                textAlign: "center",
+                padding: "24px 16px",
+                color: colors.textMuted,
+                fontSize: 14,
+              }}>
+                Aucun article trouvé pour « {searchQuery} »
+              </div>
+            ) : filteredItems.map(({ item, i }) => {
               const remainAfterMorning = item.opening - item.morningUsed;
               const remainAfterAfternoon = remainAfterMorning - item.afternoonUsed;
 
@@ -1522,265 +2009,6 @@ export default function StockJournal({ profile = null }) {
             })}
           </div>
 
-          {/* Add item */}
-          <div style={s.addArea}>
-            {showAddItem ? (
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                <div style={s.addRow}>
-                  <input
-                    type="text"
-                    value={newItemName}
-                    onChange={(e) => setNewItemName(e.target.value)}
-                    placeholder="Nom de l'article..."
-                    style={s.addInput}
-                    onKeyDown={(e) => e.key === "Enter" && addItem()}
-                    autoFocus
-                  />
-                  <button style={s.confirmBtn} onClick={addItem}>
-                    Ajouter
-                  </button>
-                </div>
-                <div style={{ display: "flex", gap: 6 }}>
-                  {[
-                    { value: "portions", label: "Portions" },
-                    { value: "kg", label: "KG" },
-                    { value: "l", label: "L" },
-                  ].map(({ value, label }) => (
-                    <button
-                      key={value}
-                      onClick={() => setNewItemUnit(value)}
-                      style={{
-                        flex: 1,
-                        padding: "8px 0",
-                        border: "1px solid " + (newItemUnit === value ? colors.accent : colors.border),
-                        borderRadius: 8,
-                        background: newItemUnit === value ? colors.accentLight : "#fff",
-                        color: newItemUnit === value ? colors.accent : colors.textMuted,
-                        fontWeight: newItemUnit === value ? 700 : 400,
-                        fontSize: 14,
-                        cursor: "pointer",
-                        fontFamily: "inherit",
-                      }}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-                {cooks.length > 0 && (
-                  <div style={{ position: 'relative' }}>
-                    <div style={{ fontSize: 11, color: colors.textMuted, fontWeight: 600, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Personnel assigné</div>
-                    <button
-                      type="button"
-                      onClick={() => setShowNewAssignDropdown(prev => !prev)}
-                      style={{
-                        width: '100%', padding: '8px 12px', background: '#fff',
-                        border: '1px solid ' + (showNewAssignDropdown ? colors.accent : colors.border),
-                        borderRadius: showNewAssignDropdown ? '8px 8px 0 0' : 8,
-                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                        cursor: 'pointer', fontFamily: 'inherit', fontSize: 13, color: colors.text,
-                      }}
-                    >
-                      <span style={{ color: newItemAssignedTo.length === 0 ? colors.textMuted : colors.text }}>
-                        {newItemAssignedTo.length === 0
-                          ? 'Aucun'
-                          : newItemAssignedTo.map(id => cooks.find(c => c.id === id)?.full_name).filter(Boolean).join(', ')}
-                      </span>
-                      <span style={{ fontSize: 11, color: colors.textMuted }}>{showNewAssignDropdown ? '▲' : '▼'}</span>
-                    </button>
-                    {showNewAssignDropdown && (
-                      <div style={{
-                        position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10,
-                        background: '#fff', border: '1px solid ' + colors.accent,
-                        borderTop: 'none', borderRadius: '0 0 8px 8px',
-                        boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-                      }}>
-                        {cooks.map((c, ci) => {
-                          const selected = newItemAssignedTo.includes(c.id);
-                          return (
-                            <div
-                              key={c.id}
-                              onClick={() => setNewItemAssignedTo(prev => selected ? prev.filter(id => id !== c.id) : [...prev, c.id])}
-                              style={{
-                                padding: '9px 12px', cursor: 'pointer', fontSize: 13,
-                                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                                background: selected ? colors.accentLight : '#fff',
-                                borderTop: ci > 0 ? '1px solid ' + colors.border : 'none',
-                              }}
-                            >
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                <span style={{
-                                  width: 18, height: 18, borderRadius: 4, border: '2px solid ' + (selected ? colors.accent : colors.border),
-                                  background: selected ? colors.accent : '#fff',
-                                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                                  flexShrink: 0,
-                                }}>
-                                  {selected && <span style={{ color: '#fff', fontSize: 11, lineHeight: 1 }}>✓</span>}
-                                </span>
-                                <span style={{ fontWeight: selected ? 600 : 400 }}>{c.full_name}</span>
-                              </div>
-                              <span style={{ fontSize: 11, color: colors.accent, fontWeight: 600 }}>
-                                {c.shift === 'après-midi' ? 'AM' : c.shift === 'journée' ? 'Jour.' : 'Mat.'}
-                              </span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            ) : (
-              <button style={s.addBtn} onClick={() => setShowAddItem(true)}>
-                + Ajouter un article
-              </button>
-            )}
-          </div>
-
-          {/* Cook counts + Verify — shown below items in midday/closing */}
-          {phase !== "opening" && (
-            <>
-              {/* Verify actual stock */}
-              <button style={s.verifyBtn} onClick={toggleVerify}>
-                {showVerify ? "Masquer la vérification" : "Vérifier le stock réel"}
-              </button>
-
-              {showVerify && (
-                <div style={{ padding: "0 16px 16px" }}>
-                  <p style={{ fontSize: 13, color: colors.textMuted, marginBottom: 10 }}>
-                    Comptage des cuisiniers du {phase === 'midday' ? 'matin' : 'soir'} vs stock attendu.
-                  </p>
-                  <div style={{ display: "flex", justifyContent: "space-between", padding: "0 14px 6px", fontSize: 11, fontWeight: 600, color: colors.textMuted, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                    <span>Article</span>
-                    <div style={{ display: "flex", gap: 24, textAlign: "right" }}>
-                      <span style={{ width: 56 }}>Reste prévu</span>
-                      <span style={{ width: 56 }}>En cuisine</span>
-                      <span style={{ width: 40 }}>Écart</span>
-                    </div>
-                  </div>
-                  {items.map((item, i) => {
-                    const expected = getRemaining(item, phase);
-                    const hasCookCount = verifyCookCounts[item.name] !== undefined;
-                    const cookCount = hasCookCount ? verifyCookCounts[item.name] : null;
-                    const diff = hasCookCount ? cookCount - expected : null;
-                    const matches = diff === 0;
-                    return (
-                      <div key={i} style={{
-                        ...s.verifyCard(hasCookCount ? diff : 0),
-                        background: !hasCookCount ? colors.card : matches ? colors.greenBg : colors.redBg,
-                        border: "1px solid " + (!hasCookCount ? colors.border : matches ? colors.green + "33" : colors.red + "33"),
-                      }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                          <div style={{ fontWeight: 600, fontSize: 14 }}>{item.name}</div>
-                          <div style={{ display: "flex", gap: 24, alignItems: "center", textAlign: "right" }}>
-                            <span style={{ width: 56, fontSize: 15, fontWeight: 700, color: colors.text }}>{expected}</span>
-                            <span style={{ width: 56, fontSize: 15, fontWeight: 700, color: hasCookCount ? colors.text : colors.textMuted }}>
-                              {hasCookCount ? cookCount : "—"}
-                            </span>
-                            <span style={{ width: 40, ...s.diffBadge(diff ?? 0), color: !hasCookCount ? colors.textMuted : matches ? colors.green : colors.red }}>
-                              {!hasCookCount ? "—" : matches ? "✓" : diff > 0 ? `+${diff}` : diff}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                  {(() => {
-                    const counted = items.filter(item => verifyCookCounts[item.name] !== undefined);
-                    if (counted.length === 0) {
-                      return (
-                        <div style={{ padding: 14, background: colors.accentLight, borderRadius: 10, textAlign: "center", marginTop: 8, color: colors.accent, fontWeight: 600, fontSize: 14 }}>
-                          Aucun comptage soumis par les cuisiniers pour ce jour
-                        </div>
-                      );
-                    }
-                    const discrepancies = counted.filter(item => verifyCookCounts[item.name] !== getRemaining(item, phase));
-                    if (discrepancies.length === 0) {
-                      return (
-                        <div style={{ padding: 14, background: colors.greenBg, borderRadius: 10, textAlign: "center", marginTop: 8, color: colors.green, fontWeight: 600, fontSize: 14 }}>
-                          ✓ Tout correspond — aucun écart détecté
-                        </div>
-                      );
-                    }
-                    const totalDiff = discrepancies.reduce((sum, item) => {
-                      return sum + Math.abs(verifyCookCounts[item.name] - getRemaining(item, phase));
-                    }, 0);
-                    return (
-                      <div style={{ padding: 14, background: colors.redBg, borderRadius: 10, textAlign: "center", marginTop: 8, color: colors.red, fontWeight: 600, fontSize: 14 }}>
-                        ⚠ {discrepancies.length} article(s) avec écart — {totalDiff} unité(s) de différence
-                      </div>
-                    );
-                  })()}
-                </div>
-              )}
-
-              {/* Cook counts */}
-              <button
-                style={{
-                  ...s.verifyBtn,
-                  background: showCookCounts ? colors.text : colors.blueBg,
-                  color: showCookCounts ? "#fff" : colors.blue,
-                }}
-                onClick={toggleCookCounts}
-              >
-                {showCookCounts ? "Masquer les comptages" : "Comptages des cuisiniers"}
-              </button>
-
-              {showCookCounts && (
-                <div style={{ padding: "0 16px 16px" }}>
-                  {cookCounts.length === 0 ? (
-                    <p style={{ textAlign: "center", color: colors.textMuted, padding: 16, fontSize: 13 }}>
-                      Aucun comptage pour ce jour.
-                    </p>
-                  ) : (() => {
-                    const groups = [];
-                    const seen = new Map();
-                    cookCounts.forEach((row) => {
-                      const key = `${row.cook_id}_${row.submitted_at}`;
-                      if (!seen.has(key)) {
-                        const g = {
-                          key,
-                          full_name: row.profiles?.full_name || "Inconnu",
-                          submitted_at: row.submitted_at,
-                          items: [],
-                        };
-                        seen.set(key, g);
-                        groups.push(g);
-                      }
-                      seen.get(key).items.push(row);
-                    });
-                    return groups.map((g) => (
-                      <div key={g.key} style={s.cookCountGroup}>
-                        <div style={{
-                          display: "flex", justifyContent: "space-between",
-                          alignItems: "baseline", marginBottom: 8,
-                        }}>
-                          <span style={{ fontWeight: 600, fontSize: 14 }}>{g.full_name}</span>
-                          <span style={{ fontSize: 12, color: colors.textMuted }}>
-                            {new Date(new Date(g.submitted_at).getTime() + 60 * 60 * 1000)
-                              .toISOString().slice(11, 16)}
-                          </span>
-                        </div>
-                        {g.items.map((row) => (
-                          <div
-                            key={row.id}
-                            style={{
-                              display: "flex", justifyContent: "space-between",
-                              fontSize: 13, paddingTop: 4, color: colors.text,
-                            }}
-                          >
-                            <span>{row.item_name}</span>
-                            <span style={{ fontWeight: 600 }}>
-                              {row.count} {row.unit === "kg" ? "KG" : row.unit === "l" ? "L" : "port."}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    ));
-                  })()}
-                </div>
-              )}
-            </>
-          )}
 
         </>
       )}
