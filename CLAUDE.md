@@ -251,6 +251,10 @@ Layout of the printed sheet:
 
 The function is `printReport()`, defined just after the summary stats block. It builds the HTML string inline and writes it to a new window — no external PDF library required.
 
+### Item sort order
+
+`filteredItems` is always sorted by `opening` quantity descending (highest stock first) in all three phases. The sort is applied after the search filter and preserves the original array index `i` so `updateItem(i, ...)` still targets the correct item in state.
+
 ## Constraints / things to preserve
 
 - **No TypeScript** — keep everything as plain `.jsx` / `.js`
