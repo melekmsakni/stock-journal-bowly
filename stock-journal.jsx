@@ -118,13 +118,15 @@ async function loadMostRecentItems(beforeDate) {
       const data = await loadDay(prev);
       if (data?.items?.length) {
         return data.items.map((item) => {
-          const remainder = (item.opening || 0) - (item.morningUsed || 0) - (item.afternoonUsed || 0);
+          const remainder = (item.opening || 0) + (item.ajoutMatin || 0) + (item.ajoutApresmidi || 0) - (item.morningUsed || 0) - (item.afternoonUsed || 0);
           return {
             name: item.name,
             unit: item.unit || "portions",
             opening: Math.max(0, remainder),
             morningUsed: 0,
             afternoonUsed: 0,
+            ajoutMatin: 0,
+            ajoutApresmidi: 0,
             assigned_to: item.assigned_to || null,
           };
         });
@@ -293,6 +295,8 @@ export default function StockJournal({ profile = null }) {
         opening: 0,
         morningUsed: 0,
         afternoonUsed: 0,
+        ajoutMatin: 0,
+        ajoutApresmidi: 0,
         assigned_to: newItemAssignedTo.length > 0 ? newItemAssignedTo : null,
       },
     ];
@@ -352,9 +356,11 @@ export default function StockJournal({ profile = null }) {
   }
 
   function getRemaining(item, afterPhase) {
+    const ajM = item.ajoutMatin || 0;
+    const ajA = item.ajoutApresmidi || 0;
     if (afterPhase === "opening") return item.opening;
-    if (afterPhase === "midday") return item.opening - item.morningUsed;
-    return item.opening - item.morningUsed - item.afternoonUsed;
+    if (afterPhase === "midday") return item.opening + ajM - item.morningUsed;
+    return item.opening + ajM + ajA - item.morningUsed - item.afternoonUsed;
   }
 
   function updateActual(itemName, value) {
@@ -1906,8 +1912,10 @@ export default function StockJournal({ profile = null }) {
                 Aucun article trouvé pour « {searchQuery} »
               </div>
             ) : filteredItems.map(({ item, i }) => {
-              const remainAfterMorning = item.opening - item.morningUsed;
-              const remainAfterAfternoon = remainAfterMorning - item.afternoonUsed;
+              const ajM = item.ajoutMatin || 0;
+              const ajA = item.ajoutApresmidi || 0;
+              const remainAfterMorning = item.opening + ajM - item.morningUsed;
+              const remainAfterAfternoon = item.opening + ajM + ajA - item.morningUsed - item.afternoonUsed;
 
               return (
                 <div key={i} style={s.itemCard}>
@@ -2046,10 +2054,10 @@ export default function StockJournal({ profile = null }) {
                     )}
                   </div>
 
-                  {/* Opening stock */}
+                  {/* Opening stock — editable only in opening phase */}
                   <div style={s.row}>
                     <span style={s.label}>
-                      {`Quantité de départ (${item.unit === "kg" ? "KG" : item.unit === "l" ? "L" : "Portions"})`}
+                      {`Départ (${item.unit === "kg" ? "KG" : item.unit === "l" ? "L" : "Portions"})`}
                     </span>
                     <input
                       type="number"
@@ -2058,12 +2066,31 @@ export default function StockJournal({ profile = null }) {
                       step="any"
                       value={item.opening || ""}
                       onChange={(e) => updateItem(i, "opening", e.target.value)}
+                      readOnly={phase !== "opening"}
                       style={s.input(phase === "opening")}
                       placeholder="0"
                     />
                   </div>
 
-                  {/* Morning sales */}
+                  {/* Ajout matin — editable in midday, read-only in closing */}
+                  {(phase === "midday" || phase === "closing") && (
+                    <div style={s.row}>
+                      <span style={s.label}>Ajout matin</span>
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        min="0"
+                        step="any"
+                        value={item.ajoutMatin || ""}
+                        onChange={(e) => updateItem(i, "ajoutMatin", e.target.value)}
+                        readOnly={phase === "closing"}
+                        style={s.input(phase === "midday")}
+                        placeholder="0"
+                      />
+                    </div>
+                  )}
+
+                  {/* Morning sales — editable in midday, read-only in closing */}
                   {(phase === "midday" || phase === "closing") && (
                     <div style={s.row}>
                       <span style={s.label}>Vendu matin</span>
@@ -2074,6 +2101,7 @@ export default function StockJournal({ profile = null }) {
                         step="any"
                         value={item.morningUsed || ""}
                         onChange={(e) => updateItem(i, "morningUsed", e.target.value)}
+                        readOnly={phase === "closing"}
                         style={s.input(phase === "midday")}
                         placeholder="0"
                       />
@@ -2083,10 +2111,27 @@ export default function StockJournal({ profile = null }) {
                     </div>
                   )}
 
-                  {/* Afternoon sales */}
+                  {/* Ajout après-midi — editable in closing only */}
                   {phase === "closing" && (
                     <div style={s.row}>
-                      <span style={s.label}>Vendu après-midi</span>
+                      <span style={s.label}>Ajout soir</span>
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        min="0"
+                        step="any"
+                        value={item.ajoutApresmidi || ""}
+                        onChange={(e) => updateItem(i, "ajoutApresmidi", e.target.value)}
+                        style={s.input(true)}
+                        placeholder="0"
+                      />
+                    </div>
+                  )}
+
+                  {/* Afternoon sales — editable in closing */}
+                  {phase === "closing" && (
+                    <div style={s.row}>
+                      <span style={s.label}>Vendu soir</span>
                       <input
                         type="number"
                         inputMode="decimal"
@@ -2094,7 +2139,7 @@ export default function StockJournal({ profile = null }) {
                         step="any"
                         value={item.afternoonUsed || ""}
                         onChange={(e) => updateItem(i, "afternoonUsed", e.target.value)}
-                        style={s.input(phase === "closing")}
+                        style={s.input(true)}
                         placeholder="0"
                       />
                       <span style={s.remaining(remainAfterAfternoon)}>

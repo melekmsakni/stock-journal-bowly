@@ -61,6 +61,16 @@ function getTodayStr() {
 }
 ```
 
+### Ajout matin / Ajout après-midi
+
+Each item has two optional restock fields: `ajoutMatin` and `ajoutApresmidi` (both default 0).
+
+- **Opening phase**: only `quantité de départ` is editable.
+- **Midday phase**: `quantité de départ` is locked (read-only). `Ajout matin` is editable (extra stock added during morning). `Vendu matin` is editable. Reste = `départ + ajoutMatin − venduMatin`.
+- **Closing phase**: `quantité de départ`, `ajout matin`, and `vendu matin` are all locked. `Ajout soir` and `Vendu soir` are editable. Final reste = `départ + ajoutMatin + ajoutApresmidi − venduMatin − venduSoir`.
+
+`getRemaining(item, phase)` incorporates both ajout fields. `loadMostRecentItems` resets both to 0 when propagating to the next day (only the net remainder carries forward as the new opening).
+
 ### Item units
 Each item has a `unit` field: `"portions"` (default), `"kg"`, or `"l"`. The unit is chosen when adding an item and can be changed later via the inline edit mode (pencil button, opening phase only). Older items without a `unit` field render as "Portions" by default. The unit label on each item card is displayed as `Quantité de départ (KG / L / Portions)` for clarity.
 
