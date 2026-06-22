@@ -1916,6 +1916,13 @@ export default function StockJournal({ profile = null }) {
               const ajA = item.ajoutApresmidi || 0;
               const remainAfterMorning = item.opening + ajM - item.morningUsed;
               const remainAfterAfternoon = item.opening + ajM + ajA - item.morningUsed - item.afternoonUsed;
+              const unitLabel = item.unit === "kg" ? "KG" : item.unit === "l" ? "L" : "Portions";
+              const cellWrap = { display: "flex", flexDirection: "column", alignItems: "center", gap: 4 };
+              const cellLbl = { fontSize: 10, color: colors.textMuted, textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700, whiteSpace: "nowrap" };
+              const lockedVal = { fontSize: 18, fontWeight: 700, color: colors.textMuted, background: colors.bg, border: "1.5px solid " + colors.border, borderRadius: 8, minWidth: 52, textAlign: "center", padding: "5px 6px", lineHeight: 1.2 };
+              const editInput = { width: 52, padding: "5px 4px", textAlign: "center", fontSize: 18, fontWeight: 700, border: "2px solid " + colors.accent, borderRadius: 8, background: colors.accentLight, fontFamily: "inherit", color: colors.text, outline: "none" };
+              const opSign = (sym) => <span style={{ fontSize: 16, fontWeight: 800, color: colors.accent, alignSelf: "flex-end", paddingBottom: 7 }}>{sym}</span>;
+              const resteBadge = (val) => <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}><span style={{ ...cellLbl, color: val >= 0 ? colors.green : colors.red }}>Reste</span><div style={{ fontSize: 18, fontWeight: 800, minWidth: 52, textAlign: "center", padding: "5px 6px", borderRadius: 8, background: val >= 0 ? colors.greenBg : colors.redBg, color: val >= 0 ? colors.green : colors.red, border: "1.5px solid " + (val >= 0 ? colors.green + "55" : colors.red + "55"), lineHeight: 1.2 }}>{val}</div></div>;
 
               return (
                 <div key={i} style={s.itemCard}>
@@ -2054,97 +2061,74 @@ export default function StockJournal({ profile = null }) {
                     )}
                   </div>
 
-                  {/* Opening stock — editable only in opening phase */}
-                  <div style={s.row}>
-                    <span style={s.label}>
-                      {`Départ (${item.unit === "kg" ? "KG" : item.unit === "l" ? "L" : "Portions"})`}
-                    </span>
-                    <input
-                      type="number"
-                      inputMode="decimal"
-                      min="0"
-                      step="any"
-                      value={item.opening || ""}
-                      onChange={(e) => updateItem(i, "opening", e.target.value)}
-                      readOnly={phase !== "opening"}
-                      style={s.input(phase === "opening")}
-                      placeholder="0"
-                    />
-                  </div>
-
-                  {/* Ajout matin — editable in midday, read-only in closing */}
-                  {(phase === "midday" || phase === "closing") && (
-                    <div style={s.row}>
-                      <span style={s.label}>Ajout matin</span>
+                  {/* Opening phase — single prominent input */}
+                  {phase === "opening" && (
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, marginTop: 12, paddingBottom: 4 }}>
+                      <span style={cellLbl}>Quantité de départ ({unitLabel})</span>
                       <input
-                        type="number"
-                        inputMode="decimal"
-                        min="0"
-                        step="any"
-                        value={item.ajoutMatin || ""}
-                        onChange={(e) => updateItem(i, "ajoutMatin", e.target.value)}
-                        readOnly={phase === "closing"}
-                        style={s.input(phase === "midday")}
+                        type="number" inputMode="decimal" min="0" step="any"
+                        value={item.opening || ""}
+                        onChange={(e) => updateItem(i, "opening", e.target.value)}
                         placeholder="0"
+                        style={{ width: 100, padding: "8px 8px", textAlign: "center", fontSize: 26, fontWeight: 800, border: "2px solid " + colors.accent, borderRadius: 10, background: colors.accentLight, fontFamily: "inherit", color: colors.text, outline: "none" }}
                       />
                     </div>
                   )}
 
-                  {/* Morning sales — editable in midday, read-only in closing */}
-                  {(phase === "midday" || phase === "closing") && (
-                    <div style={s.row}>
-                      <span style={s.label}>Vendu matin</span>
-                      <input
-                        type="number"
-                        inputMode="decimal"
-                        min="0"
-                        step="any"
-                        value={item.morningUsed || ""}
-                        onChange={(e) => updateItem(i, "morningUsed", e.target.value)}
-                        readOnly={phase === "closing"}
-                        style={s.input(phase === "midday")}
-                        placeholder="0"
-                      />
-                      <span style={s.remaining(remainAfterMorning)}>
-                        Reste: {remainAfterMorning}
-                      </span>
+                  {/* Midday phase — equation row: Départ + Ajout matin − Vendu matin = Reste */}
+                  {phase === "midday" && (
+                    <div style={{ display: "flex", alignItems: "flex-end", gap: 8, marginTop: 12, paddingBottom: 4, justifyContent: "center", flexWrap: "wrap" }}>
+                      <div style={cellWrap}>
+                        <span style={cellLbl}>Qté départ</span>
+                        <div style={lockedVal}>{item.opening}</div>
+                      </div>
+                      {opSign("+")}
+                      <div style={cellWrap}>
+                        <span style={cellLbl}>Ajout matin</span>
+                        <input type="number" inputMode="decimal" min="0" step="any" value={item.ajoutMatin || ""} onChange={(e) => updateItem(i, "ajoutMatin", e.target.value)} placeholder="0" style={editInput} />
+                      </div>
+                      {opSign("−")}
+                      <div style={cellWrap}>
+                        <span style={cellLbl}>Vendu matin</span>
+                        <input type="number" inputMode="decimal" min="0" step="any" value={item.morningUsed || ""} onChange={(e) => updateItem(i, "morningUsed", e.target.value)} placeholder="0" style={editInput} />
+                      </div>
+                      {opSign("=")}
+                      {resteBadge(remainAfterMorning)}
                     </div>
                   )}
 
-                  {/* Ajout après-midi — editable in closing only */}
+                  {/* Closing phase — two rows: morning summary (locked) + afternoon inputs */}
                   {phase === "closing" && (
-                    <div style={s.row}>
-                      <span style={s.label}>Ajout soir</span>
-                      <input
-                        type="number"
-                        inputMode="decimal"
-                        min="0"
-                        step="any"
-                        value={item.ajoutApresmidi || ""}
-                        onChange={(e) => updateItem(i, "ajoutApresmidi", e.target.value)}
-                        style={s.input(true)}
-                        placeholder="0"
-                      />
-                    </div>
-                  )}
-
-                  {/* Afternoon sales — editable in closing */}
-                  {phase === "closing" && (
-                    <div style={s.row}>
-                      <span style={s.label}>Vendu soir</span>
-                      <input
-                        type="number"
-                        inputMode="decimal"
-                        min="0"
-                        step="any"
-                        value={item.afternoonUsed || ""}
-                        onChange={(e) => updateItem(i, "afternoonUsed", e.target.value)}
-                        style={s.input(true)}
-                        placeholder="0"
-                      />
-                      <span style={s.remaining(remainAfterAfternoon)}>
-                        Reste: {remainAfterAfternoon}
-                      </span>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 12, paddingBottom: 4 }}>
+                      {/* Morning row — all locked, muted */}
+                      <div style={{ display: "flex", alignItems: "flex-end", gap: 8, justifyContent: "center", flexWrap: "wrap", opacity: 0.65 }}>
+                        <div style={cellWrap}><span style={cellLbl}>Qté départ</span><div style={lockedVal}>{item.opening}</div></div>
+                        {opSign("+")}
+                        <div style={cellWrap}><span style={cellLbl}>Ajout mat.</span><div style={lockedVal}>{ajM}</div></div>
+                        {opSign("−")}
+                        <div style={cellWrap}><span style={cellLbl}>Vendu mat.</span><div style={lockedVal}>{item.morningUsed || 0}</div></div>
+                        {opSign("=")}
+                        <div style={cellWrap}>
+                          <span style={{ ...cellLbl, color: remainAfterMorning >= 0 ? colors.green : colors.red }}>Reste mat.</span>
+                          <div style={{ ...lockedVal, color: remainAfterMorning >= 0 ? colors.green : colors.red, background: remainAfterMorning >= 0 ? colors.greenBg : colors.redBg, border: "1.5px solid " + (remainAfterMorning >= 0 ? colors.green + "44" : colors.red + "44") }}>{remainAfterMorning}</div>
+                        </div>
+                      </div>
+                      {/* Divider */}
+                      <div style={{ height: 1, background: colors.border, margin: "0 4px" }} />
+                      {/* Afternoon row — editable */}
+                      <div style={{ display: "flex", alignItems: "flex-end", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
+                        <div style={cellWrap}>
+                          <span style={cellLbl}>Ajout soir</span>
+                          <input type="number" inputMode="decimal" min="0" step="any" value={item.ajoutApresmidi || ""} onChange={(e) => updateItem(i, "ajoutApresmidi", e.target.value)} placeholder="0" style={editInput} />
+                        </div>
+                        {opSign("−")}
+                        <div style={cellWrap}>
+                          <span style={cellLbl}>Vendu soir</span>
+                          <input type="number" inputMode="decimal" min="0" step="any" value={item.afternoonUsed || ""} onChange={(e) => updateItem(i, "afternoonUsed", e.target.value)} placeholder="0" style={editInput} />
+                        </div>
+                        {opSign("=")}
+                        {resteBadge(remainAfterAfternoon)}
+                      </div>
                     </div>
                   )}
                 </div>
