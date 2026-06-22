@@ -1000,11 +1000,12 @@ export default function StockJournal({ profile = null }) {
     win.print();
   }
 
-  const filteredItems = searchQuery
+  const filteredItems = (searchQuery
     ? items.map((item, i) => ({ item, i })).filter(({ item }) =>
         item.name.toLowerCase().includes(searchQuery.toLowerCase())
       )
-    : items.map((item, i) => ({ item, i }));
+    : items.map((item, i) => ({ item, i }))
+  ).sort((a, b) => (b.item.opening || 0) - (a.item.opening || 0));
 
   return (
     <div style={s.app}>
