@@ -224,6 +224,16 @@ In midday and closing phases, two pill buttons sit between the summary bar and t
 ### Search + Add row
 A single flex row: a search input (flex: 1, with 🔍 icon and ×-clear button) and a 44×44 amber square "+" button. Clicking "+" expands an add-item form below the row as an accordion (name input, unit picker, cook assignment dropdown, Ajouter button). Clicking "×" collapses and resets the form.
 
+### Item card field layout (equation style)
+
+Each item card displays its phase fields as a visual equation rather than stacked label/input rows.
+
+- **Opening phase**: Single large centered amber input for "Quantité de départ (KG/L/Portions)".
+- **Midday phase**: One horizontal flex row — `Qté départ [locked grey box] + Ajout matin [amber input] − Vendu matin [amber input] = Reste [green/red badge]`. Operator signs (+, −, =) are amber bold spans aligned to the baseline.
+- **Closing phase**: Two rows separated by a thin divider. Top row (morning summary, opacity 0.65): `Qté départ + Ajout mat. − Vendu mat. = Reste mat.` — all locked grey boxes, muted. Bottom row (afternoon, active): `Ajout soir [amber input] − Vendu soir [amber input] = Reste final [green/red badge]`.
+
+Style constants (`cellWrap`, `cellLbl`, `lockedVal`, `editInput`, `opSign`, `resteBadge`) are defined as local variables inside the `filteredItems.map()` callback — not in the global `s` styles object — because they are only used inside that render loop.
+
 ### Print / PDF report
 
 A 🖨️ button sits in the summary bar (disabled when no items). Clicking it opens a new browser window with a print-ready HTML page and triggers `window.print()` — the browser's "Save as PDF" handles the download.
