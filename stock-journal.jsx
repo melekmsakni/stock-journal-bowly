@@ -117,23 +117,26 @@ async function loadMostRecentItems(beforeDate) {
     if (prev) {
       const data = await loadDay(prev);
       if (data?.items?.length) {
-        return data.items.map((item) => {
-          const remainder = (item.opening || 0) + (item.ajoutMatin || 0) + (item.ajoutApresmidi || 0) - (item.morningUsed || 0) - (item.afternoonUsed || 0);
-          return {
-            name: item.name,
-            unit: item.unit || "portions",
-            opening: Math.max(0, remainder),
-            morningUsed: 0,
-            afternoonUsed: 0,
-            ajoutMatin: 0,
-            ajoutApresmidi: 0,
-            assigned_to: item.assigned_to || null,
-          };
-        });
+        return {
+          sourceDate: prev,
+          items: data.items.map((item) => {
+            const remainder = (item.opening || 0) + (item.ajoutMatin || 0) + (item.ajoutApresmidi || 0) - (item.morningUsed || 0) - (item.afternoonUsed || 0);
+            return {
+              name: item.name,
+              unit: item.unit || "portions",
+              opening: Math.max(0, remainder),
+              morningUsed: 0,
+              afternoonUsed: 0,
+              ajoutMatin: 0,
+              ajoutApresmidi: 0,
+              assigned_to: item.assigned_to || null,
+            };
+          }),
+        };
       }
     }
   } catch {}
-  return null;
+  return { sourceDate: null, items: null };
 }
 
 async function loadAllDayKeys() {
@@ -200,9 +203,12 @@ export default function StockJournal({ profile = null }) {
   const [verifyCookCounts, setVerifyCookCounts] = useState({});
   const [searchQuery, setSearchQuery] = useState("");
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const [prevDate, setPrevDate] = useState(null);
 
   // Tracks the latest load so stale async results (from Realtime or fast navigation) are discarded
   const loadIdRef = useRef(0);
+  // Always holds the latest items/phase/actualStock/date so Realtime handlers can read them without stale closures
+  const currentStateRef = useRef({ items: [], phase: "opening", actualStock: {}, date: getTodayStr() });
 
   // Load day data
   const loadDayData = useCallback(async (d, { silent = false } = {}) => {
@@ -211,13 +217,27 @@ export default function StockJournal({ profile = null }) {
     const data = await loadDay(d);
     if (loadId !== loadIdRef.current) return; // navigated away while loading
     if (data) {
-      setItems(data.items || []);
+      const { sourceDate, items: prevItems } = await loadMostRecentItems(d);
+      if (loadId !== loadIdRef.current) return;
+      setPrevDate(sourceDate);
+      // Always recalculate opening from yesterday's current reste so stale propagation is corrected
+      let loadedItems = data.items || [];
+      if (prevItems) {
+        loadedItems = loadedItems.map(item => {
+          const prevItem = prevItems.find(p => p.name === item.name);
+          return prevItem ? { ...item, opening: prevItem.opening } : item;
+        });
+        const hasChanged = loadedItems.some((item, idx) => item.opening !== (data.items[idx]?.opening));
+        if (hasChanged) saveDay(d, { items: loadedItems, phase: data.phase || "opening", actualStock: data.actualStock || {} });
+      }
+      setItems(loadedItems);
       setPhase(data.phase || "opening");
       setActualStock(data.actualStock || {});
     } else {
-      const prevItems = await loadMostRecentItems(d);
+      const { sourceDate, items: prevItems } = await loadMostRecentItems(d);
       if (loadId !== loadIdRef.current) return; // navigated away while loading
       setItems(prevItems || []);
+      setPrevDate(sourceDate);
       setPhase("opening");
       setActualStock({});
     }
@@ -228,6 +248,11 @@ export default function StockJournal({ profile = null }) {
   useEffect(() => {
     loadDayData(date);
   }, [date, loadDayData]);
+
+  // Keep ref in sync so Realtime handlers always read the latest state
+  useEffect(() => {
+    currentStateRef.current = { items, phase, actualStock, date };
+  }, [items, phase, actualStock, date]);
 
   // Real-time sync: reload when another user saves the same day
   useEffect(() => {
@@ -242,6 +267,30 @@ export default function StockJournal({ profile = null }) {
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [date, loadDayData]);
+
+  // Real-time sync: when the previous day's data changes, recalculate today's opening quantities
+  useEffect(() => {
+    if (!supabase || !prevDate) return;
+    const channel = supabase
+      .channel(`stock_history_prev_${prevDate}_for_${date}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: HISTORY_TABLE, filter: `date=eq.${prevDate}` },
+        async () => {
+          const { items: newPrevItems } = await loadMostRecentItems(currentStateRef.current.date);
+          if (!newPrevItems) return;
+          const { items: cur, phase: ph, actualStock: as, date: d } = currentStateRef.current;
+          const updated = cur.map(item => {
+            const prevItem = newPrevItems.find(p => p.name === item.name);
+            return prevItem ? { ...item, opening: prevItem.opening } : item;
+          });
+          setItems(updated);
+          saveDay(d, { items: updated, phase: ph, actualStock: as });
+        }
+      )
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [prevDate, date]);
 
   // Auto-save
   const save = useCallback(
